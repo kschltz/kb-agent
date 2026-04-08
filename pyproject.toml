@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "kb-agent"
+version = "0.1.0"
+description = "Kanban board for coding agents"
+requires-python = ">=3.10"
+dependencies = ["pyyaml>=6.0"]
+
+[project.scripts]
+kb = "kb.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["kb*"]

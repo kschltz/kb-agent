@@ -1,0 +1,24 @@
+{
+  "id": "kb-remaining-10",
+  "seq": "10",
+  "title": "kb recover: detect and clean orphaned worktrees",
+  "status": "pending",
+  "depends_on": [],
+  "parallel": true,
+  "suggested_agent": "CoderAgent",
+  "context_files": [],
+  "reference_files": [
+    "kb/board.py",
+    "kb/cli.py",
+    "DESIGN.md"
+  ],
+  "acceptance_criteria": [
+    "kb recover lists worktrees with missing card directories and vice versa",
+    "kb recover --clean removes orphaned worktrees",
+    "kb recover detects branches starting with kb/ that have no matching card",
+    "Dry-run mode shows what would be cleaned without doing it"
+  ],
+  "deliverables": [
+    "kb/board.py (new recover method)",
+    "kb/cli.py (new cmd_recover)"
+  ]

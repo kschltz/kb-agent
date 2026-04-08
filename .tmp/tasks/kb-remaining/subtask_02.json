@@ -1,0 +1,27 @@
+{
+  "id": "kb-remaining-02",
+  "seq": "02",
+  "title": "Board view component: lanes as columns with cards",
+  "status": "pending",
+  "depends_on": ["kb-remaining-01"],
+  "parallel": false,
+  "suggested_agent": "CoderAgent",
+  "context_files": [],
+  "reference_files": [
+    "kb/ui.html",
+    "kb/server.py",
+    "DESIGN.md"
+  ],
+  "acceptance_criteria": [
+    "Board renders lanes as horizontal columns with WIP limits shown",
+    "Cards display title, status badges, assigned agent, blocked state",
+    "Cards sorted by priority within lanes",
+    "Empty lanes show placeholder text",
+    "Board header shows project name and base branch",
+    "Visual parity with existing ui.html dark theme"
+  ],
+  "deliverables": [
+    "web/src/components/BoardView.tsx",
+    "web/src/components/LaneColumn.tsx",
+    "web/src/components/CardItem.tsx"
+  ]

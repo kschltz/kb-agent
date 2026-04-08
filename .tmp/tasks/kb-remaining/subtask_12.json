@@ -1,0 +1,25 @@
+{
+  "id": "kb-remaining-12",
+  "seq": "12",
+  "title": "README, usage guide, and example board.yaml",
+  "status": "pending",
+  "depends_on": ["kb-remaining-08", "kb-remaining-09", "kb-remaining-10", "kb-remaining-11"],
+  "parallel": false,
+  "suggested_agent": "CoderAgent",
+  "context_files": [],
+  "reference_files": [
+    "DESIGN.md",
+    "kb/cli.py",
+    "kb/board.py"
+  ],
+  "acceptance_criteria": [
+    "README.md covers installation, quickstart, all CLI commands, board.yaml config",
+    "Example board.yaml with comments explaining each field",
+    "Example CLAUDE.md showing how to use kb with Claude Code",
+    "Usage guide covers workflow: init → add → pull → move → done"
+  ],
+  "deliverables": [
+    "README.md",
+    "examples/board.yaml",
+    "examples/CLAUDE.md"
+  ]

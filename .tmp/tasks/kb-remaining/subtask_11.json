@@ -1,0 +1,23 @@
+{
+  "id": "kb-remaining-11",
+  "seq": "11",
+  "title": "Merge conflict detection and kb log --since",
+  "status": "pending",
+  "depends_on": [],
+  "parallel": true,
+  "suggested_agent": "CoderAgent",
+  "context_files": [],
+  "reference_files": [
+    "kb/board.py",
+    "kb/cli.py"
+  ],
+  "acceptance_criteria": [
+    "kb move to done detects merge conflicts before attempting merge",
+    "Conflict detected: card stays in review, error message shows conflicted files",
+    "kb log <card> --since <timestamp> returns only entries after the timestamp",
+    "kb log --since works with both unix timestamps and ISO date strings"
+  ],
+  "deliverables": [
+    "kb/board.py (updated _merge_card, load_history with since filter)",
+    "kb/cli.py (updated cmd_log with --since improvements)"
+  ]

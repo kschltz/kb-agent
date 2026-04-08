@@ -1,0 +1,26 @@
+{
+  "id": "kb-remaining-03",
+  "seq": "03",
+  "title": "WebSocket hook and live state management",
+  "status": "pending",
+  "depends_on": ["kb-remaining-01"],
+  "parallel": true,
+  "suggested_agent": "CoderAgent",
+  "context_files": [],
+  "reference_files": [
+    "kb/server.py",
+    "kb/ui.html"
+  ],
+  "acceptance_criteria": [
+    "useBoard hook connects to WebSocket on mount",
+    "Receives state updates and pushes to React state",
+    "Reconnects automatically on disconnect",
+    "Sends UI commands (move, block, note, add) via WebSocket",
+    "Handles connection errors gracefully with status indicator",
+    "Works with existing server.py WebSocket protocol"
+  ],
+  "deliverables": [
+    "web/src/hooks/useBoard.ts",
+    "web/src/hooks/useWebSocket.ts",
+    "web/src/types.ts"
+  ]

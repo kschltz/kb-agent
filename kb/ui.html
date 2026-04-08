@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kb — agent control</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-0: #0a0c0f;
+  --bg-1: #10131a;
+  --bg-2: #181c26;
+  --bg-3: #1f2533;
+  --border: #2a3040;
+  --border-hi: #3a4560;
+  --text-0: #e8ecf4;
+  --text-1: #a0aabe;
+  --text-2: #6b7590;
+  --accent: #4aefb5;
+  --accent-dim: #2a8f6a;
+  --accent-glow: rgba(74, 239, 181, 0.15);
+  --warn: #f0a050;
+  --warn-dim: #905820;
+  --danger: #ef5a5a;
+  --danger-dim: #8f2a2a;
+  --blue: #5a9ef0;
+  --blue-dim: #2a4a8f;
+  --purple: #a07aef;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+  --radius: 6px;
+  --lane-gap: 12px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: var(--sans);
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── Noise texture overlay ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Layout ── */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ── Header ── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.logo {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.5px;
+  color: var(--accent);
+}
+.project-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  padding: 2px 8px;
+  background: var(--bg-2);
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+.branch-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--blue);
+  padding: 2px 8px;
+  background: rgba(90, 158, 240, 0.08);
+  border: 1px solid var(--blue-dim);
+  border-radius: 3px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.status-led {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: pulse-led 2s ease-in-out infinite;
+}
+.status-led.disconnected {
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger);
+}
+@keyframes pulse-led {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.status-text {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.btn-add {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-add:hover {
+  background: var(--accent-glow);
+  border-color: var(--accent-dim);
+}
+
+/* ── Board ── */
+.board {
+  display: flex;
+  gap: var(--lane-gap);
+  padding: var(--lane-gap);
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ── Lane ── */
+.lane {
+  flex: 1;
+  min-width: 260px;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.lane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
+.lane-title {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-1);
+}
+.lane-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+}
+.lane-count {
+  padding: 1px 6px;
+  background: var(--bg-3);
+  border-radius: 3px;
+}
+.lane-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lane-body::-webkit-scrollbar { width: 4px; }
+.lane-body::-webkit-scrollbar-track { background: transparent; }
+.lane-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.lane-body.drag-over {
+  background: var(--accent-glow);
+  border: 1px dashed var(--accent-dim);
+  border-radius: 4px;
+  margin: 4px;
+  padding: 4px;
+}
+.lane-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  opacity: 0.5;
+}
+
+/* ── Card ── */
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  cursor: grab;
+  transition: all 0.15s;
+  position: relative;
+}
+.card:hover {
+  border-color: var(--border-hi);
+  background: var(--bg-3);
+}
+.card:active { cursor: grabbing; }
+.card.dragging {
+  opacity: 0.4;
+  transform: scale(0.97);
+}
+.card.blocked {
+  border-left: 3px solid var(--danger);
+}
+.card.assigned {
+  border-left: 3px solid var(--accent);
+}
+.card-id {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  margin-bottom: 3px;
+}
+.card-title {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--text-0);
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 6px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-2);
+}
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.badge {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.badge-agent {
+  background: var(--accent-glow);
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+}
+.badge-blocked {
+  background: rgba(239, 90, 90, 0.1);
+  border: 1px solid var(--danger-dim);
+  color: var(--danger);
+}
+.badge-branch {
+  background: rgba(90, 158, 240, 0.08);
+  border: 1px solid var(--blue-dim);
+  color: var(--blue);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge-diff {
+  background: rgba(160, 122, 239, 0.08);
+  border: 1px solid rgba(160, 122, 239, 0.3);
+  color: var(--purple);
+}
+
+/* ── Detail panel (slide-out) ── */
+.overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 100;
+}
+.overlay.open { display: block; }
+.detail-panel {
+  position: fixed;
+  top: 0;
+  right: -560px;
+  width: 560px;
+  height: 100vh;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border);
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  transition: right 0.25s ease;
+  overflow: hidden;
+}
+.detail-panel.open { right: 0; }
+.detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
+.detail-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-0);
+  margin-bottom: 4px;
+}
+.detail-header .card-id {
+  font-size: 11px;
+  margin-bottom: 0;
+}
+.btn-close {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  width: 28px; height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.btn-close:hover { border-color: var(--text-2); color: var(--text-0); }
+
+.detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.detail-body::-webkit-scrollbar { width: 4px; }
+.detail-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.detail-section {
+  margin-bottom: 20px;
+}
+.detail-section-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-meta-grid {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+.detail-meta-grid dt {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.detail-meta-grid dd {
+  color: var(--text-0);
+  font-family: var(--mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* ── History timeline ── */
+.timeline { display: flex; flex-direction: column; gap: 2px; }
+.timeline-entry {
+  display: flex;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  transition: background 0.1s;
+}
+.timeline-entry:hover { background: var(--bg-2); }
+.timeline-ts {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  white-space: nowrap;
+  min-width: 60px;
+  padding-top: 1px;
+}
+.timeline-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.timeline-dot.system { background: var(--text-2); }
+.timeline-dot.human { background: var(--accent); }
+.timeline-dot.agent { background: var(--blue); }
+.timeline-content {
+  flex: 1;
+  color: var(--text-1);
+  font-size: 12px;
+}
+.timeline-role {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 6px;
+}
+.timeline-role.system { color: var(--text-2); }
+.timeline-role.human { color: var(--accent); }
+.timeline-role.agent { color: var(--blue); }
+.timeline-action {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-2);
+  margin-right: 6px;
+}
+.gate-fail { color: var(--danger) !important; }
+.gate-pass { color: var(--accent) !important; }
+
+/* ── Diff viewer ── */
+.diff-block {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--text-1);
+  max-height: 400px;
+  overflow-y: auto;
+}
+.diff-block .add { color: var(--accent); }
+.diff-block .del { color: var(--danger); }
+.diff-block .hunk { color: var(--purple); }
+.diff-block .file { color: var(--blue); font-weight: 600; }
+
+/* ── Actions bar ── */
+.detail-actions {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-2);
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text-1);
+  transition: all 0.15s;
+}
+.btn:hover {
+  border-color: var(--border-hi);
+  color: var(--text-0);
+}
+.btn-accent {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.btn-accent:hover {
+  background: var(--accent-glow);
+}
+.btn-danger {
+  border-color: var(--danger-dim);
+  color: var(--danger);
+}
+.btn-danger:hover {
+  background: rgba(239,90,90,0.1);
+}
+.btn-warn {
+  border-color: var(--warn-dim);
+  color: var(--warn);
+}
+.btn-warn:hover {
+  background: rgba(240,160,80,0.1);
+}
+
+/* ── Note input ── */
+.note-input-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.note-input {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-0);
+  outline: none;
+}
+.note-input:focus { border-color: var(--accent-dim); }
+.note-input::placeholder { color: var(--text-2); }
+
+/* ── Modal ── */
+.modal-bg {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+}
+.modal-bg.open { display: flex; }
+.modal {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  width: 420px;
+  max-width: 90vw;
+}
+.modal h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.modal label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.modal input, .modal textarea {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-0);
+  outline: none;
+  margin-bottom: 12px;
+}
+.modal input:focus, .modal textarea:focus { border-color: var(--accent-dim); }
+.modal textarea { min-height: 80px; resize: vertical; }
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ── Toast ── */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.toast {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-0);
+  animation: toast-in 0.2s ease;
+  max-width: 360px;
+}
+.toast.error { border-color: var(--danger-dim); color: var(--danger); }
+.toast.success { border-color: var(--accent-dim); color: var(--accent); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Animations ── */
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.card { animation: card-enter 0.2s ease; }
+
+/* ── Activity bar (bottom) ── */
+.activity-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 20px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.activity-bar .activity-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activity-bar .activity-ts { color: var(--text-2); margin-right: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="header-left">
+      <span class="logo">kb</span>
+      <span class="project-name" id="project-name">—</span>
+      <span class="branch-badge" id="branch-badge">—</span>
+    </div>
+    <div class="header-right">
+      <button class="btn-add" id="btn-add-card">+ add card</button>
+      <div class="status-led" id="status-led"></div>
+      <span class="status-text" id="status-text">connecting</span>
+    </div>
+  </div>
+
+  <div class="board" id="board"></div>
+
+  <div class="activity-bar" id="activity-bar">
+    <span style="color:var(--text-2);">activity:</span>
+    <span class="activity-item" id="last-activity">waiting for updates...</span>
+  </div>
+</div>
+
+<!-- Detail panel -->
+<div class="overlay" id="overlay"></div>
+<div class="detail-panel" id="detail-panel">
+  <div class="detail-header">
+    <div>
+      <div class="card-id" id="detail-id"></div>
+      <h2 id="detail-title"></h2>
+    </div>
+    <button class="btn-close" id="btn-close-detail">✕</button>
+  </div>
+  <div class="detail-body" id="detail-body"></div>
+  <div class="detail-actions" id="detail-actions"></div>
+</div>
+
+<!-- Add card modal -->
+<div class="modal-bg" id="add-modal">
+  <div class="modal">
+    <h3>Add card</h3>
+    <label>Title</label>
+    <input type="text" id="add-title" placeholder="What needs to be done?">
+    <label>Description</label>
+    <textarea id="add-desc" placeholder="Optional details, acceptance criteria..."></textarea>
+    <div class="modal-actions">
+      <button class="btn" id="add-cancel">Cancel</button>
+      <button class="btn btn-accent" id="add-submit">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────
+let boardState = null;
+let ws = null;
+let selectedCard = null;
+let dragCard = null;
+let reconnectTimer = null;
+
+// ── WebSocket ─────────────────────────────────────────────────
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/`);
+
+  ws.onopen = () => {
+    document.getElementById('status-led').className = 'status-led';
+    document.getElementById('status-text').textContent = 'connected';
+  };
+
+  ws.onclose = () => {
+    document.getElementById('status-led').className = 'status-led disconnected';
+    document.getElementById('status-text').textContent = 'disconnected';
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => {};
+
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'state') {
+      boardState = msg.data;
+      render();
+      if (selectedCard) refreshDetail();
+    } else if (msg.type === 'result') {
+      if (msg.data && !msg.data.success) {
+        toast(msg.data.message || 'Action failed', 'error');
+      }
+    } else if (msg.type === 'error') {
+      toast(msg.data, 'error');
+    }
+  };
+}
+
+function send(cmd) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify(cmd));
+  }
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ── Render board ──────────────────────────────────────────────
+function render() {
+  if (!boardState || boardState.error) return;
+
+  document.getElementById('project-name').textContent = boardState.project || 'kb';
+  document.getElementById('branch-badge').textContent = `⎇ ${boardState.base_branch || 'main'}`;
+
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  // collect recent activity
+  let allEvents = [];
+
+  for (const lane of boardState.lanes) {
+    const laneEl = document.createElement('div');
+    laneEl.className = 'lane';
+    laneEl.dataset.lane = lane.name;
+
+    const maxWip = lane.max_wip || '∞';
+    const maxPar = lane.max_parallelism || '—';
+    const count = lane.cards.length;
+
+    laneEl.innerHTML = `
+      <div class="lane-header">
+        <span class="lane-title">${esc(lane.name)}</span>
+        <div class="lane-meta">
+          <span class="lane-count">${count}/${maxWip}</span>
+          ${lane.max_parallelism ? `<span title="Max parallelism">⊞${maxPar}</span>` : ''}
+        </div>
+      </div>
+    `;
+
+    const body = document.createElement('div');
+    body.className = 'lane-body';
+    body.dataset.lane = lane.name;
+
+    // drag-and-drop targets
+    body.addEventListener('dragover', (e) => { e.preventDefault(); body.classList.add('drag-over'); });
+    body.addEventListener('dragleave', () => body.classList.remove('drag-over'));
+    body.addEventListener('drop', (e) => {
+      e.preventDefault();
+      body.classList.remove('drag-over');
+      if (dragCard && dragCard.lane !== lane.name) {
+        send({ action: 'move', card_id: dragCard.id, lane: lane.name });
+      }
+      dragCard = null;
+    });
+
+    if (lane.cards.length === 0) {
+      body.innerHTML = '<div class="lane-empty">no cards</div>';
+    } else {
+      for (const card of lane.cards) {
+        body.appendChild(renderCard(card));
+        // collect events
+        if (card.history) {
+          for (const h of card.history) {
+            allEvents.push({ ...h, card_id: card.id, card_title: card.title });
+          }
+        }
+      }
+    }
+
+    laneEl.appendChild(body);
+    board.appendChild(laneEl);
+  }
+
+  // show last activity
+  allEvents.sort((a, b) => b.ts - a.ts);
+  if (allEvents.length > 0) {
+    const last = allEvents[0];
+    const ts = fmtTime(last.ts);
+    document.getElementById('last-activity').innerHTML =
+      `<span class="activity-ts">${ts}</span> [${esc(last.card_id)}] ${esc(last.action)}: ${esc(last.content || '').substring(0, 120)}`;
+  }
+}
+
+function renderCard(card) {
+  const el = document.createElement('div');
+  el.className = 'card' + (card.blocked ? ' blocked' : '') + (card.assigned_agent ? ' assigned' : '');
+  el.draggable = true;
+  el.dataset.id = card.id;
+
+  el.addEventListener('dragstart', (e) => {
+    dragCard = card;
+    el.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  el.addEventListener('dragend', () => {
+    el.classList.remove('dragging');
+    dragCard = null;
+    // remove all drag-over states
+    document.querySelectorAll('.drag-over').forEach(x => x.classList.remove('drag-over'));
+  });
+  el.addEventListener('click', () => openDetail(card));
+
+  let badges = '';
+  if (card.assigned_agent) badges += `<span class="badge badge-agent">● ${esc(card.assigned_agent)}</span>`;
+  if (card.blocked) badges += `<span class="badge badge-blocked">⊘ blocked</span>`;
+  if (card.branch) badges += `<span class="badge badge-branch" title="${esc(card.branch)}">${esc(card.branch.replace('kb/', ''))}</span>`;
+  if (card.diff_stat && card.diff_stat.trim()) badges += `<span class="badge badge-diff">Δ</span>`;
+
+  let tags = '';
+  if (card.tags && card.tags.length) {
+    tags = '<div class="card-tags">' + card.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('') + '</div>';
+  }
+
+  el.innerHTML = `
+    <div class="card-id">#${esc(card.id)}</div>
+    <div class="card-title">${esc(card.title)}</div>
+    ${tags}
+    <div class="card-meta">${badges}</div>
+  `;
+  return el;
+}
+
+// ── Detail panel ──────────────────────────────────────────────
+function openDetail(card) {
+  selectedCard = card;
+  document.getElementById('overlay').classList.add('open');
+  document.getElementById('detail-panel').classList.add('open');
+  refreshDetail();
+}
+
+function closeDetail() {
+  selectedCard = null;
+  document.getElementById('overlay').classList.remove('open');
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+function refreshDetail() {
+  if (!selectedCard || !boardState) return;
+
+  // find updated card data
+  let card = selectedCard;
+  for (const lane of boardState.lanes) {
+    for (const c of lane.cards) {
+      if (c.id === selectedCard.id) { card = c; selectedCard = c; break; }
+    }
+  }
+
+  document.getElementById('detail-id').textContent = `#${card.id}`;
+  document.getElementById('detail-title').textContent = card.title;
+
+  const body = document.getElementById('detail-body');
+  body.innerHTML = '';
+
+  // Meta
+  const meta = document.createElement('div');
+  meta.className = 'detail-section';
+  meta.innerHTML = `
+    <div class="detail-section-title">Details</div>
+    <dl class="detail-meta-grid">
+      <dt>Lane</dt><dd>${esc(card.lane)}</dd>
+      <dt>Priority</dt><dd>${card.priority}</dd>
+      <dt>Blocked</dt><dd>${card.blocked ? `Yes — ${esc(card.blocked_reason)}` : 'No'}</dd>
+      <dt>Agent</dt><dd>${card.assigned_agent || '—'}</dd>
+      <dt>Branch</dt><dd>${card.branch || '—'}</dd>
+      <dt>Created</dt><dd>${fmtFull(card.created_at)}</dd>
+      <dt>Updated</dt><dd>${fmtFull(card.updated_at)}</dd>
+    </dl>
+  `;
+  body.appendChild(meta);
+
+  // Diff stat
+  if (card.diff_stat && card.diff_stat.trim()) {
+    const diffSec = document.createElement('div');
+    diffSec.className = 'detail-section';
+    diffSec.innerHTML = `
+      <div class="detail-section-title">Changes</div>
+      <div class="diff-block">${esc(card.diff_stat)}</div>
+    `;
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'btn btn-accent';
+    viewBtn.style.marginTop = '8px';
+    viewBtn.textContent = 'View full diff';
+    viewBtn.onclick = () => {
+      send({ action: 'diff', card_id: card.id });
+      // listen for result
+      const origHandler = ws.onmessage;
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'result' && msg.data.diff !== undefined) {
+          showFullDiff(msg.data.diff, diffSec);
+          ws.onmessage = origHandler;
+        } else {
+          origHandler(ev);
+        }
+      };
+    };
+    diffSec.appendChild(viewBtn);
+    body.appendChild(diffSec);
+  }
+
+  // History
+  if (card.history && card.history.length) {
+    const histSec = document.createElement('div');
+    histSec.className = 'detail-section';
+    histSec.innerHTML = `<div class="detail-section-title">History (${card.history.length})</div>`;
+    const timeline = document.createElement('div');
+    timeline.className = 'timeline';
+
+    // show last 50 entries
+    const entries = card.history.slice(-50);
+    for (const e of entries) {
+      const entry = document.createElement('div');
+      entry.className = 'timeline-entry';
+
+      let actionClass = '';
+      if (e.action === 'gate_fail') actionClass = 'gate-fail';
+      if (e.action === 'gate_pass') actionClass = 'gate-pass';
+
+      entry.innerHTML = `
+        <span class="timeline-ts">${fmtTime(e.ts)}</span>
+        <span class="timeline-dot ${e.role || 'system'}"></span>
+        <div class="timeline-content">
+          <span class="timeline-role ${e.role || 'system'}">${e.role || '?'}</span>
+          <span class="timeline-action ${actionClass}">${esc(e.action || '?')}</span>
+          ${esc(e.content || '')}
+        </div>
+      `;
+      timeline.appendChild(entry);
+    }
+    histSec.appendChild(timeline);
+    body.appendChild(histSec);
+  }
+
+  // Note input
+  const noteSec = document.createElement('div');
+  noteSec.className = 'detail-section';
+  noteSec.innerHTML = `
+    <div class="detail-section-title">Add note</div>
+    <div class="note-input-row">
+      <input class="note-input" id="note-input" placeholder="Type a note for the agent..." />
+      <button class="btn btn-accent" id="note-send">Send</button>
+    </div>
+  `;
+  body.appendChild(noteSec);
+
+  setTimeout(() => {
+    const inp = document.getElementById('note-input');
+    const btn = document.getElementById('note-send');
+    if (inp && btn) {
+      const doSend = () => {
+        const msg = inp.value.trim();
+        if (msg) {
+          send({ action: 'note', card_id: card.id, message: msg });
+          inp.value = '';
+          toast('Note added', 'success');
+        }
+      };
+      btn.onclick = doSend;
+      inp.onkeydown = (e) => { if (e.key === 'Enter') doSend(); };
+    }
+  }, 0);
+
+  // Action buttons
+  const actions = document.getElementById('detail-actions');
+  actions.innerHTML = '';
+
+  // Move buttons
+  if (boardState) {
+    const laneNames = boardState.lanes.map(l => l.name);
+    const idx = laneNames.indexOf(card.lane);
+
+    if (idx < laneNames.length - 1) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-accent';
+      btn.textContent = `→ ${laneNames[idx + 1]}`;
+      btn.onclick = () => send({ action: 'move', card_id: card.id, lane: laneNames[idx + 1] });
+      actions.appendChild(btn);
+    }
+    if (idx > 0) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-warn';
+      btn.textContent = `← ${laneNames[idx - 1]}`;
+      btn.onclick = () => send({ action: 'reject', card_id: card.id, reason: 'Rejected via UI' });
+      actions.appendChild(btn);
+    }
+  }
+
+  if (card.blocked) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-accent';
+    btn.textContent = 'Unblock';
+    btn.onclick = () => send({ action: 'unblock', card_id: card.id });
+    actions.appendChild(btn);
+  } else {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-danger';
+    btn.textContent = 'Block';
+    btn.onclick = () => {
+      const reason = prompt('Block reason:');
+      if (reason !== null) send({ action: 'block', card_id: card.id, reason });
+    };
+    actions.appendChild(btn);
+  }
+}
+
+function showFullDiff(diff, container) {
+  // replace the diff stat block with full colored diff
+  const existing = container.querySelector('.diff-block');
+  if (existing) {
+    existing.innerHTML = colorDiff(diff);
+    existing.style.maxHeight = '600px';
+  }
+}
+
+function colorDiff(text) {
+  return text.split('\n').map(line => {
+    const e = esc(line);
+    if (line.startsWith('+++') || line.startsWith('---')) return `<span class="file">${e}</span>`;
+    if (line.startsWith('@@')) return `<span class="hunk">${e}</span>`;
+    if (line.startsWith('+')) return `<span class="add">${e}</span>`;
+    if (line.startsWith('-')) return `<span class="del">${e}</span>`;
+    return e;
+  }).join('\n');
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function fmtFull(ts) {
+  if (!ts) return '';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+// ── Event listeners ───────────────────────────────────────────
+document.getElementById('btn-close-detail').onclick = closeDetail;
+document.getElementById('overlay').onclick = closeDetail;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(); });
+
+// Add card modal
+document.getElementById('btn-add-card').onclick = () => {
+  document.getElementById('add-modal').classList.add('open');
+  setTimeout(() => document.getElementById('add-title').focus(), 50);
+};
+document.getElementById('add-cancel').onclick = () => {
+  document.getElementById('add-modal').classList.remove('open');
+};
+document.getElementById('add-submit').onclick = () => {
+  const title = document.getElementById('add-title').value.trim();
+  if (!title) return;
+  const desc = document.getElementById('add-desc').value.trim();
+  send({ action: 'add', title, description: desc });
+  document.getElementById('add-title').value = '';
+  document.getElementById('add-desc').value = '';
+  document.getElementById('add-modal').classList.remove('open');
+  toast('Card created', 'success');
+};
+document.getElementById('add-title').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('add-submit').click();
+});
+document.getElementById('add-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('add-modal')) {
+    document.getElementById('add-modal').classList.remove('open');
+  }
+});
+
+// ── Boot ──────────────────────────────────────────────────────
+connect();
+</script>
+</body>
+</html>

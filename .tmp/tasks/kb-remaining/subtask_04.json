@@ -1,0 +1,27 @@
+{
+  "id": "kb-remaining-04",
+  "seq": "04",
+  "title": "Card detail panel with history timeline and diff viewer",
+  "status": "pending",
+  "depends_on": ["kb-remaining-02", "kb-remaining-03"],
+  "parallel": false,
+  "suggested_agent": "CoderAgent",
+  "context_files": [],
+  "reference_files": [
+    "DESIGN.md",
+    "kb/board.py"
+  ],
+  "acceptance_criteria": [
+    "Clicking a card opens a slide-out detail sheet",
+    "Description rendered as markdown",
+    "History shown as timeline color-coded by role (system=gray, human=blue, agent=green)",
+    "Gate results shown with pass/fail badges",
+    "Diff stat shown with file change summary",
+    "Full diff available via expandable section with syntax highlighting",
+    "Panel can be closed with Escape key or X button"
+  ],
+  "deliverables": [
+    "web/src/components/CardDetail.tsx",
+    "web/src/components/HistoryTimeline.tsx",
+    "web/src/components/DiffViewer.tsx"
+  ]

@@ -1,0 +1,27 @@
+{
+  "id": "kb-remaining-05",
+  "seq": "05",
+  "title": "Drag-and-drop lane transitions with gate execution",
+  "status": "pending",
+  "depends_on": ["kb-remaining-02", "kb-remaining-03"],
+  "parallel": false,
+  "suggested_agent": "CoderAgent",
+  "context_files": [],
+  "reference_files": [
+    "DESIGN.md",
+    "kb/server.py",
+    "kb/ui.html"
+  ],
+  "acceptance_criteria": [
+    "Cards can be dragged between lanes using @dnd-kit",
+    "Drop triggers move command via WebSocket",
+    "If gate fails, card snaps back to original lane with error toast",
+    "WIP limit violations are enforced (drop rejected with message)",
+    "Blocked cards show visual indicator and cannot be dragged forward",
+    "Drop placeholder shows where card will land"
+  ],
+  "deliverables": [
+    "web/src/components/DraggableCard.tsx",
+    "web/src/components/DroppableLane.tsx",
+    "web/src/hooks/useDragAndDrop.ts"
+  ]
