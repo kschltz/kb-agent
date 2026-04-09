@@ -1,0 +1,37 @@
+# Example board.yaml for a Node.js project
+# Copy to .kanban/board.yaml and customize
+
+project: my-app
+base_branch: main
+
+# How cards merge when entering "done": squash | merge | rebase
+merge_strategy: squash
+
+# Command template for spawning sub-agents
+# {card_id}, {worktree}, and {branch} are replaced with actual values
+agent_command: "claude --system-prompt \"$(kb context {card_id})\" --cwd {worktree}"
+
+lanes:
+  # Cards start here. No limits — this is the backlog.
+  - name: backlog
+
+  # Active work. max_wip limits total cards, max_parallelism limits
+  # how many agents can work simultaneously.
+  - name: in-progress
+    max_wip: 5
+    max_parallelism: 2
+
+  # Code review. Gates run when moving FROM in-progress TO review.
+  # All gates must pass (exit 0) for the move to succeed.
+  - name: review
+    max_wip: 3
+    gate_from_in-progress:
+      # Run tests in the card's worktree
+      - "cd $KB_WORKTREE && npm test"
+
+  # Done lane. on_enter: merge squashes the card's branch into base.
+  # The worktree is cleaned up after merge.
+  - name: done
+    gate_from_review:
+      - "cd $KB_WORKTREE && npm run lint"
+    on_enter: merge

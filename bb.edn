@@ -1,0 +1,8 @@
+{:paths ["src"]
+ :deps {}
+ :tasks
+ {kb   {:doc "kb kanban board CLI"
+         :task (do (require '[kb.cli])
+                   (apply (resolve 'kb.cli/main) *command-line-args*))}
+  serve {:doc "Start the kb web UI server"
+         :task (do (require '[kb.cli]) ((resolve 'kb.cli/main) "serve"))}}}

@@ -1,0 +1,8 @@
+#!/bin/bash
+# kb — Kanban Board for Coding Agents
+# Usage: kb <command> [options]
+# Install: ln -s /path/to/kb-agent/bin/kb /usr/local/bin/kb
+#   or:    add to PATH in your shell profile
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec bb --config "$SCRIPT_DIR/../bb.edn" kb "$@"
