@@ -279,9 +279,9 @@
 
 (defn run-server
   "Start the HTTP/WebSocket server and file watcher.
-   Options: {:host \"127.0.0.1\" :port 8741}"
+   Options: {:host \"0.0.0.0\" :port 8741}"
   [{:keys [host port]
-    :or   {host "127.0.0.1" port 8741}}]
+    :or   {host "0.0.0.0" port 8741}}]
   (let [kanban-root (try
                       (util/find-root)
                       (catch Exception _
