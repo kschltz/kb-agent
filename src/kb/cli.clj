@@ -165,6 +165,19 @@
       (out-json card)
       (println (str "Unblocked card " (:id card))))))
 
+(defn cmd-approve
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)]
+    (try
+      (let [card (b/approve! board card-id :agent (or (:agent opts) "human"))]
+        (if (:json opts)
+          (out-json card)
+          (println (str "Approved card " (:id card)))))
+      (catch Exception e
+        (fail! (.getMessage e))))))
+
 (defn cmd-note
   [{:keys [opts]}]
   (let [card-id (->card-id opts)
@@ -302,7 +315,8 @@
               (println "  (empty)")
               (doseq [c lane-cards]
                 (let [flags (cond-> []
-                              (:blocked c)        (conj "BLOCKED")
+                              (:blocked c)          (conj "BLOCKED")
+                              (:pending-approval c)  (conj "PENDING APPROVAL")
                               (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
                               (not (str/blank? (:branch c "")))         (conj (:branch c))
                               (seq (:tags c))                           (conj (str/join " " (map #(str "#" %) (:tags c)))))
@@ -432,6 +446,7 @@
   (println "  reject   <card-id> [opts]               Reject a card back to previous lane")
   (println "  block    <card-id> [opts]               Block a card")
   (println "  unblock  <card-id> [opts]               Unblock a card")
+  (println "  approve  <card-id> [opts]               Approve a card pending approval")
   (println "  note     <card-id> <message> [opts]     Add a note to a card")
   (println "  log      <card-id> [opts]               Show card history")
   (println "  diff     <card-id> [opts]               Show card diff vs base branch")
@@ -454,6 +469,7 @@
    {:cmds ["reject"]  :fn cmd-reject  :args->opts [:card-id]}
    {:cmds ["block"]   :fn cmd-block   :args->opts [:card-id]}
    {:cmds ["unblock"] :fn cmd-unblock :args->opts [:card-id]}
+   {:cmds ["approve"] :fn cmd-approve :args->opts [:card-id]}
    {:cmds ["note"]    :fn cmd-note    :args->opts [:card-id :message]}
    {:cmds ["log"]     :fn cmd-log     :args->opts [:card-id]}
    {:cmds ["diff"]    :fn cmd-diff    :args->opts [:card-id]}

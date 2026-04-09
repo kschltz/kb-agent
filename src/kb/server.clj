@@ -96,6 +96,13 @@
       (do (board/unblock! b card_id)
           {:success true})
 
+      "approve"
+      (try
+        (let [card (board/approve! b card_id :agent "human-ui")]
+          {:success true :card card})
+        (catch Exception e
+          {:success false :message (.getMessage e)}))
+
       "note"
       (do (board/add-note! b card_id (or message "") :agent "human")
           {:success true})
