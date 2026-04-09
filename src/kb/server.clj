@@ -46,9 +46,11 @@
 (defn get-board-state
   "Returns a map representing the full board state for JSON serialisation.
    Uses all-cards once + group-by to avoid N+1 directory scans per lane."
-  []
-  (try
-    (let [b        (board/make-board)
+  ([]
+   (get-board-state nil))
+  ([kanban-root]
+   (try
+    (let [b        (board/make-board kanban-root)
           cards    (board/all-cards b)
           by-lane  (group-by :lane cards)]
       {:project     (get (:config b) "project" "")
@@ -69,7 +71,7 @@
                           (get (:config b) "lanes" []))
        :timestamp   (util/now-epoch)})
     (catch Exception _
-      {:error "No .kanban/ found"})))
+      {:error "No .kanban/ found"}))))
 
 ;; ── Command dispatch ─────────────────────────────────────────
 
@@ -168,8 +170,8 @@
 ;; ── Request handler ──────────────────────────────────────────
 
 (defn- make-handler
-  "Build a Ring handler function closed over the resolved dist-dir and cached HTML."
-  [dist-dir project-root]
+  "Build a Ring handler function closed over the resolved dist-dir, kanban-root, and cached HTML."
+  [dist-dir project-root kanban-root]
   (let [cached-html (get-html dist-dir project-root)]
     (fn [req]
     (let [uri (:uri req)]
@@ -182,7 +184,7 @@
              (add-client! ch)
              ;; Send current board state on connect
              (hk/send! ch (json/generate-string {:type "state"
-                                                  :data (get-board-state)})))
+                                                  :data (get-board-state kanban-root)})))
 
            :on-receive
            (fn [ch raw-msg]
@@ -193,7 +195,7 @@
                  (hk/send! ch (json/generate-string {:type "result" :data result}))
                  ;; Broadcast updated state to all connected clients
                  (broadcast! (json/generate-string {:type "state"
-                                                     :data (get-board-state)})))
+                                                     :data (get-board-state kanban-root)})))
                (catch Exception e
                  (hk/send! ch (json/generate-string {:type "error"
                                                       :data (.getMessage e)})))))
@@ -206,7 +208,7 @@
         (= uri "/api/state")
         {:status  200
          :headers {"Content-Type" "application/json"}
-         :body    (json/generate-string (get-board-state))}
+         :body    (json/generate-string (get-board-state kanban-root))}
 
         ;; Root / index
         (contains? #{"/" "/index.html"} uri)
@@ -269,7 +271,7 @@
         (when (not= current last-snapshot)
           (try
             (broadcast! (json/generate-string {:type "state"
-                                               :data (get-board-state)}))
+                                               :data (get-board-state (str kanban-root))}))
             (catch Exception _)))
         (recur current)))))
 
@@ -289,7 +291,7 @@
         ;; project-root is the parent of .kanban/
         project-root (.getParent ^Path (util/->path kanban-root))
         dist-dir     (resolve-dist-dir project-root)
-        handler      (make-handler dist-dir project-root)
+        handler      (make-handler dist-dir project-root kanban-root)
         server       (hk/run-server handler {:host host :port port})]
 
     (let [url (str "http://" host ":" port)]

@@ -456,8 +456,8 @@
   (let [card (load-card board card-id)]
     (if (str/blank? (:branch card))
       "(no branch)"
-      (let [r (git-safe :args (into ["diff"] extra-args
-                                    [(str (base-branch board) "..." (:branch card))])
+      (let [r (git-safe :args (into ["diff"] (concat extra-args
+                                                    [(str (base-branch board) "..." (:branch card))]))
                         :cwd (:project-root board))]
         (if (= 0 (:exit r)) (:out r) (:err r))))))
 
