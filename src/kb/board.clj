@@ -39,10 +39,13 @@
   "Construct a card map with defaults."
   [id title lane & {:keys [priority blocked blocked-reason assigned-agent
                            branch worktree created-at updated-at tags
-                           pending-approval approved-by]
+                           pending-approval approved-by
+                           pending-question last-heartbeat]
                     :or {priority 0 blocked false blocked-reason ""
                          assigned-agent "" branch "" worktree ""
                          pending-approval false approved-by ""
+                         pending-question nil
+                         last-heartbeat nil
                          tags []}}]
   (let [now (u/now-epoch)]
     {:id               id
@@ -58,12 +61,13 @@
      :updated-at       (or updated-at now)
      :tags             tags
      :pending-approval pending-approval
-     :approved-by      approved-by}))
+     :approved-by      approved-by
+     :pending-question (or pending-question "")
+     :last-heartbeat   last-heartbeat}))
 
 (defn- card-from-yaml
   "Convert a YAML map (with snake_case keys as keywords or strings) to a card map."
   [data]
-  ;; clj-yaml parses snake_case keys as keyword :blocked_reason etc
   (let [d (map-keys (fn [k] (snake->kebab k)) data)]
     {:id               (str (:id d ""))
      :title            (str (:title d ""))
@@ -78,25 +82,30 @@
      :updated-at       (double (or (:updated-at d) (u/now-epoch)))
      :tags             (vec (or (:tags d) []))
      :pending-approval (boolean (:pending-approval d))
-     :approved-by      (str (:approved-by d ""))}))
+     :approved-by      (str (:approved-by d ""))
+     :pending-question (or (:pending-question d) "")
+     :last-heartbeat   (when (:last-heartbeat d) (double (:last-heartbeat d)))}))
 
 (defn- card->yaml-map
   "Convert a card map to snake_case keys for YAML serialization."
   [card]
-  {"id"               (:id card)
-   "title"            (:title card)
-   "lane"             (:lane card)
-   "priority"         (:priority card)
-   "blocked"          (:blocked card)
-   "blocked_reason"   (:blocked-reason card)
-   "assigned_agent"   (:assigned-agent card)
-   "branch"           (:branch card)
-   "worktree"         (:worktree card)
-   "created_at"       (:created-at card)
-   "updated_at"       (:updated-at card)
-   "tags"             (:tags card)
-   "pending_approval" (:pending-approval card)
-   "approved_by"      (:approved-by card)})
+  (let [m {"id"               (:id card)
+           "title"            (:title card)
+           "lane"             (:lane card)
+           "priority"         (:priority card)
+           "blocked"          (:blocked card)
+           "blocked_reason"   (:blocked-reason card)
+           "assigned_agent"   (:assigned-agent card)
+           "branch"           (:branch card)
+           "worktree"         (:worktree card)
+           "created_at"       (:created-at card)
+           "updated_at"       (:updated-at card)
+           "tags"             (:tags card)
+           "pending_approval" (:pending-approval card)
+           "approved_by"      (:approved-by card)}]
+    (cond-> m
+      (:pending-question card) (assoc "pending_question" (:pending-question card))
+      (:last-heartbeat card)   (assoc "last_heartbeat"   (:last-heartbeat card)))))
 
 ;; ── HistoryEntry shape ────────────────────────────────────────
 ;;
@@ -845,6 +854,135 @@
 
         (assoc result :cleaned @cleaned))))))
 
+;; ── Gate introspection ─────────────────────────────────────────
+
+(defn gates-for-card
+  "Return the list of gate commands the card would need to pass to move forward.
+   Returns a vector of {:gate cmd :description nil} maps."
+  [board card-id]
+  (let [card       (load-card board card-id)
+        names      (lane-names board)
+        idx        (.indexOf names (:lane card))
+        next-idx   (when (and (>= idx 0) (< (inc idx) (count names)))
+                     (inc idx))]
+    (if-not next-idx
+      []
+      (let [next-lane   (nth names next-idx)
+            next-config (lane-by-name board next-lane)
+            gate-key    (str "gate_from_" (:lane card))
+            gates       (get next-config gate-key [])]
+        (mapv (fn [cmd] {:gate cmd
+                         :target-lane next-lane
+                         :description (get next-config "gate_description" nil)})
+              gates)))))
+
+(defn last-gate-failure
+  "Return the most recent gate_fail history entry for a card, or nil."
+  [board card-id]
+  (let [history (load-history board card-id)]
+    (->> history
+         (filter #(= "gate_fail" (:action %)))
+         last)))
+
+(defn recent-human-notes
+  "Return the last N human notes from card history."
+  [board card-id & {:keys [n] :or {n 3}}]
+  (let [history (load-history board card-id)]
+    (->> history
+         (filter #(and (= "human" (:role %))
+                       (contains? #{"note" "answer"} (:action %))))
+         (take-last n))))
+
+;; ── Card editing ───────────────────────────────────────────────
+
+(defn edit-card!
+  "Edit card fields. Returns updated card."
+  [board card-id & {:keys [title priority description tags]}]
+  (let [card (load-card board card-id)
+        card' (cond-> card
+                title       (assoc :title title)
+                priority    (assoc :priority priority)
+                tags        (assoc :tags tags))]
+    (save-card! board card')
+    (when description
+      (save-description! board card-id description))
+    (append-history! board card-id
+                     (make-history-entry "system" "edited"
+                                         :content (str "Card edited"
+                                                       (when title (str " title='" title "'"))
+                                                       (when priority (str " priority=" priority)))))
+    card'))
+
+;; ── Ask/Answer ─────────────────────────────────────────────────
+
+(defn ask!
+  "Mark a card as having a pending question. Blocks the card with the question.
+   Returns updated card."
+  [board card-id question & {:keys [agent] :or {agent ""}}]
+  (let [card    (load-card board card-id)
+        updated (assoc card :pending-question question :blocked true
+                            :blocked-reason (str "Question: " question))]
+    (save-card! board updated)
+    (append-history! board card-id
+                     (make-history-entry (if (str/blank? agent) "agent" "agent")
+                                         "ask"
+                                         :content question
+                                         :agent-id (if (str/blank? agent) "" agent)))
+    updated))
+
+(defn answer!
+  "Answer a pending question on a card. Unblocks it and records the answer.
+   Returns updated card."
+  [board card-id answer & {:keys [agent] :or {agent "human"}}]
+  (let [card (load-card board card-id)]
+    (when-not (:pending-question card)
+      (throw (ex-info (str "Card " card-id " has no pending question.") {})))
+    (let [updated (assoc card :pending-question nil
+                            :blocked false
+                            :blocked-reason "")]
+      (save-card! board updated)
+      (append-history! board card-id
+                       (make-history-entry "human" "answer"
+                                           :content answer
+                                           :agent-id agent))
+      updated)))
+
+;; ── Heartbeat ──────────────────────────────────────────────────
+
+(defn heartbeat!
+  "Record an agent heartbeat for a card."
+  [board card-id & {:keys [agent] :or {agent ""}}]
+  (let [card (load-card board card-id)
+        now  (u/now-epoch)
+        updated (assoc card :last-heartbeat now)]
+    (save-card! board updated)
+    (append-history! board card-id
+                     (make-history-entry "agent" "heartbeat"
+                                         :content "Agent heartbeat"
+                                         :agent-id agent))
+    updated))
+
+;; ── Advance / Done shortcuts ───────────────────────────────────
+
+(defn advance!
+  "Move card to the next lane in the workflow. Returns [success? message gate-results]."
+  [board card-id & {:keys [agent] :or {agent ""}}]
+  (let [card   (load-card board card-id)
+        names  (lane-names board)
+        idx    (.indexOf names (:lane card))
+        next   (when (and (>= idx 0) (< (inc idx) (count names)))
+                 (nth names (inc idx)))]
+    (if next
+      (move! board card-id next :agent agent)
+      [false (str "Card is already in the last lane ('" (:lane card) "').") []])))
+
+(defn done!
+  "Move card directly to the last lane (runs all intermediate gates). Returns [success? message gate-results]."
+  [board card-id & {:keys [agent] :or {agent ""}}]
+  (let [names     (lane-names board)
+        last-lane (last names)]
+    (move! board card-id last-lane :agent agent)))
+
 ;; ── Context generation ─────────────────────────────────────────
 
 (defn get-context
@@ -871,6 +1009,24 @@
                              gate-key    (str "gate_from_" (:lane card))]
                          (get next-config gate-key [])))
 
+          all-cards-raw (all-cards board)
+          lane-cards   (filterv #(and (= (:lane %) (:lane card))
+                                       (not= (:id %) card-id))
+                                all-cards-raw)
+          blocked-cards (filterv :blocked all-cards-raw)
+          recent-hnotes (->> history
+                             (filter #(and (= "human" (:role %))
+                                           (contains? #{"note" "answer"} (:action %))))
+                             (take-last 3))
+          last-gfail   (->> history
+                            (filter #(= "gate_fail" (:action %)))
+                            last)
+          board-summary (->> (lane-names board)
+                             (mapv (fn [ln]
+                                     (let [lc (count (filter #(= (:lane %) ln) all-cards-raw))]
+                                       (str ln ": " lc " card(s)"))))
+                             (str/join ", "))
+
           lines (-> [(str "# Task: " (:title card))
                      (str "Card ID: " (:id card))
                      (str "Lane: " (:lane card))
@@ -883,9 +1039,37 @@
                     (into (when (seq next-gates)
                              (into [(str "## Gates to pass (moving to '" (nth names (inc idx)) "')") ""]
                                    (mapv #(str "- `" % "`") next-gates))))
+                    (into (when last-gfail
+                             ["## Last gate failure" ""
+                              (str "Gate: `" (:gate last-gfail "") "`")
+                              (str "Output: " (:content last-gfail))
+                              "Fix the issue above and retry with `kb move`." ""]))
                     (into (when (and diff-stat (not (str/blank? diff-stat))
                                      (not (str/includes? diff-stat "(no branch)")))
                              ["## Current changes" "" "```" (str/trim diff-stat) "```" ""]))
+                    (into (when (seq recent-hnotes)
+                             (into ["## Recent human notes (IMPORTANT — read these)" ""]
+                                   (mapv (fn [e]
+                                           (str "- [" (u/fmt-time (:ts e)) "] "
+                                                (:action e) ": " (:content e)))
+                                         recent-hnotes))))
+                    (into (when (and (:pending-question card)
+                                    (not (str/blank? (:pending-question card))))
+                             ["## Your pending question" ""
+                              (:pending-question card)
+                              "Wait for a human to answer via `kb answer`." ""]))
+                    (into (when (not-empty board-summary)
+                             ["## Board summary" "" board-summary ""]))
+                    (into (when (seq lane-cards)
+                             (into ["## Other cards in your lane" ""]
+                                   (mapv #(str "- [" (:id %) "] " (:title %)
+                                               (when (:blocked %) " (BLOCKED)"))
+                                         lane-cards))))
+                    (into (when (seq blocked-cards)
+                             (into ["## Blocked cards" ""]
+                                   (mapv #(str "- [" (:id %) "] " (:title %)
+                                               " — " (:blocked-reason %))
+                                         blocked-cards))))
                     (into (when (seq history)
                              (into ["## History" ""]
                                    (mapv (fn [entry]
@@ -909,12 +1093,16 @@
                         "Use these commands to interact with the board:"
                         ""
                         (str "- `kb note " card-id " \"<message>\"` -- log your thinking or progress")
-                        (str "- `kb move " card-id " <lane>` -- attempt to move the card forward (runs gates)")
-                        (str "- `kb log " card-id "` -- check for new human notes or instructions")
+                        (str "- `kb ask " card-id " \"<question>\"` -- ask the human a question (card will be blocked until answered)")
+                        (str "- `kb advance " card-id "` -- move card to the next lane (runs gates)")
+                        (str "- `kb move " card-id " <lane>` -- move card to a specific lane (runs gates)")
+                        (str "- `kb log " card-id "` -- check for new human notes or answers")
                         (str "- `kb diff " card-id "` -- see your changes vs the base branch")
+                        (str "- `kb heartbeat " card-id "` -- signal you are still working (call every 2 minutes)")
                         ""
                         "Before each major step, check `kb log` for new human instructions."
-                        "When you believe the task is complete and tests pass, move the card to the next lane."])))))
+                        "If you are unsure about something, use `kb ask` to ask the human."
+                        "When you believe the task is complete and tests pass, use `kb advance` to move forward."])))))
 
 ;; ── Init board ────────────────────────────────────────────────
 

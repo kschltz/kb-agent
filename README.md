@@ -77,13 +77,21 @@ kb serve                             # open web UI
 | `kb add <title> [--desc FILE]` | Create a card in backlog |
 | `kb pull [--lane] [--agent]` | Claim next card, create worktree + branch; `--lane` auto-moves card |
 | `kb move <card> <lane>` | Move card; run gates; merge on entering `done` |
+| `kb advance <card>` | Move card to next lane (shortcut for move) |
+| `kb done <card>` | Move card to final lane (runs all gates) |
 | `kb reject <card> [--reason]` | Push card back to previous lane |
 | `kb block <card> [--reason]` | Block a card |
 | `kb unblock <card>` | Remove block |
+| `kb ask <card> <question>` | Ask the human a question (blocks card until answered) |
+| `kb answer <card> <answer>` | Answer a pending question (unblocks card) |
+| `kb approve <card>` | Approve a card pending approval |
 | `kb note <card> <message>` | Add a note to card history |
 | `kb log <card> [--since TS]` | Show structured conversation history |
 | `kb diff <card> [--stat]` | Show git diff of card's branch vs base |
 | `kb show <card>` | Full card details: meta + history + diff stats |
+| `kb gates <card>` | Show gates for the next lane transition |
+| `kb edit <card> [--title ...] [--priority N] [--desc ...]` | Edit card fields |
+| `kb heartbeat <card>` | Record an agent heartbeat (signal you're alive) |
 | `kb status` | Print the board |
 | `kb context <card>` | Output card context for agent system prompt |
 | `kb spawn <card>` | Start a sub-agent scoped to this card |

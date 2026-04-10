@@ -77,7 +77,7 @@
 
 (defn handle-ui-command
   "Execute a UI command map and return a result map."
-  [{:keys [action card_id lane reason message title description] :as cmd}]
+  [{:keys [action card_id lane reason message title description question answer] :as cmd}]
   (let [b (board/make-board)]
     (case action
       "move"
@@ -105,6 +105,20 @@
         (catch Exception e
           {:success false :message (.getMessage e)}))
 
+      "ask"
+      (try
+        (let [card (board/ask! b card_id (or question "") :agent "human-ui")]
+          {:success true :card card})
+        (catch Exception e
+          {:success false :message (.getMessage e)}))
+
+      "answer"
+      (try
+        (let [card (board/answer! b card_id (or answer "") :agent "human")]
+          {:success true :card card})
+        (catch Exception e
+          {:success false :message (.getMessage e)}))
+
       "note"
       (do (board/add-note! b card_id (or message "") :agent "human")
           {:success true})
@@ -114,11 +128,31 @@
                                      :description (or description ""))]
         {:success true :card card})
 
+      "edit"
+      (try
+        (let [card (board/edit-card! b card_id
+                                    :title title
+                                    :description description
+                                    :priority (when-let [p (get cmd :priority)] p))]
+          {:success true :card card})
+        (catch Exception e
+          {:success false :message (.getMessage e)}))
+
+      "heartbeat"
+      (try
+        (let [card (board/heartbeat! b card_id :agent "human-ui")]
+          {:success true :card card})
+        (catch Exception e
+          {:success false :message (.getMessage e)}))
+
       "diff"
       {:success true :diff (board/get-diff b card_id)}
 
       "context"
       {:success true :context (board/get-context b card_id)}
+
+      "gates"
+      {:success true :gates (board/gates-for-card b card_id)}
 
       ;; unknown action
       {:success false :message (str "Unknown action: " action)})))

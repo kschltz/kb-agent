@@ -1,13 +1,13 @@
 (ns kb.cli
   "CLI entry point for kb kanban board.
    Invoked via: bb -m kb.cli  or  bb run serve"
-  (:require [babashka.cli     :as cli]
+  (:require [babashka.cli :as cli]
             [babashka.process :as proc]
-            [cheshire.core    :as json]
-            [clojure.java.io  :as io]
-            [clojure.string   :as str]
-            [kb.board         :as b]
-            [kb.util          :as u]))
+            [cheshire.core :as json]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [kb.board :as b]
+            [kb.util :as u]))
 
 ;; ── Output helpers ────────────────────────────────────────────
 
@@ -37,18 +37,18 @@
   (let [cmd-template (get (:config board) "agent_command" "")]
     (when (str/blank? cmd-template)
       (fail! (str "no agent_command template configured in board.yaml. "
-                "Add an agent_command field to .kanban/board.yaml. Example:\n"
-                "  agent_command: 'claude --system-prompt \"$(kb context {card_id})\" "
-                "--cwd {worktree}'")))
+                  "Add an agent_command field to .kanban/board.yaml. Example:\n"
+                  "  agent_command: 'claude --system-prompt \"$(kb context {card_id})\" "
+                  "--cwd {worktree}'")))
     (let [cmd (-> cmd-template
-                  (str/replace "{card_id}"  (or (:id card) ""))
+                  (str/replace "{card_id}" (or (:id card) ""))
                   (str/replace "{worktree}" (or (:worktree card) "."))
-                  (str/replace "{branch}"   (or (:branch card) "")))]
+                  (str/replace "{branch}" (or (:branch card) "")))]
       ;; Record spawn event in history
       (b/append-history! board (:id card)
-                         {:ts      (u/now-epoch)
-                          :role    "system"
-                          :action  "spawned"
+                         {:ts (u/now-epoch)
+                          :role "system"
+                          :action "spawned"
                           :content (str "Sub-agent spawned: " cmd)})
       (println (str "Spawning agent for card " (:id card) "..."))
       (println (str "  Command: " cmd))
@@ -76,20 +76,20 @@
   (let [title (:title opts)
         _ (when (str/blank? title) (fail! "title is required"))
         board (b/make-board)
-        tags  (if (str/blank? (:tags opts ""))
-                []
-                (mapv str/trim (str/split (:tags opts) #",")))
+        tags (if (str/blank? (:tags opts ""))
+               []
+               (mapv str/trim (str/split (:tags opts) #",")))
         ;; Description: try as file path first, fall back to inline text
-        desc  (let [d (:desc opts "")]
-                (if (str/blank? d)
-                  ""
-                  (let [f (io/file d)]
-                    (if (.exists f) (slurp f) d))))
-        card  (b/create-card! board title
-                              :lane        (:lane opts)
-                              :tags        tags
-                              :priority    (or (:priority opts) 0)
-                              :description desc)]
+        desc (let [d (:desc opts "")]
+               (if (str/blank? d)
+                 ""
+                 (let [f (io/file d)]
+                   (if (.exists f) (slurp f) d))))
+        card (b/create-card! board title
+                             :lane (:lane opts)
+                             :tags tags
+                             :priority (or (:priority opts) 0)
+                             :description desc)]
     (if (:json opts)
       (out-json card)
       (println (str "Created card " (:id card) ": " (:title card) " [" (:lane card) "]")))))
@@ -97,7 +97,7 @@
 (defn cmd-pull
   [{:keys [opts]}]
   (let [board (b/make-board)
-        card  (b/pull! board :agent (:agent opts "") :lane (:lane opts))]
+        card (b/pull! board :agent (:agent opts "") :lane (:lane opts))]
     (if (nil? card)
       (do
         (when (:json opts) (out-json nil))
@@ -117,14 +117,14 @@
 (defn cmd-move
   [{:keys [opts]}]
   (let [card-id (->card-id opts)
-        lane    (:lane opts)
+        lane (:lane opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
-        _ (when (str/blank? lane)    (fail! "lane is required"))
-        board   (b/make-board)
+        _ (when (str/blank? lane) (fail! "lane is required"))
+        board (b/make-board)
         [success? message gate-results] (b/move! board card-id lane :agent (:agent opts ""))]
     (if (:json opts)
-      (out-json {:success      success?
-                 :message      message
+      (out-json {:success success?
+                 :message message
                  :gate_results gate-results})
       (if success?
         (println (str "\u2713 " message))
@@ -138,9 +138,9 @@
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)
-        card  (b/reject! board card-id
-                         :reason (:reason opts "")
-                         :agent  (:agent opts ""))]
+        card (b/reject! board card-id
+                        :reason (:reason opts "")
+                        :agent (:agent opts ""))]
     (if (:json opts)
       (out-json card)
       (println (str "Rejected card " (:id card) " \u2192 " (:lane card))))))
@@ -150,7 +150,7 @@
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)
-        card  (b/block! board card-id (or (:reason opts) ""))]
+        card (b/block! board card-id (or (:reason opts) ""))]
     (if (:json opts)
       (out-json card)
       (println (str "Blocked card " (:id card) ": " (:reason opts ""))))))
@@ -160,7 +160,7 @@
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)
-        card  (b/unblock! board card-id)]
+        card (b/unblock! board card-id)]
     (if (:json opts)
       (out-json card)
       (println (str "Unblocked card " (:id card))))))
@@ -186,6 +186,15 @@
         _ (when (str/blank? message) (fail! "message is required"))
         board (b/make-board)]
     (b/add-note! board card-id message :agent (or (:agent opts) "human"))
+    (when (and (:worktree (b/load-card board card-id))
+               (not (str/blank? (:worktree (b/load-card board card-id)))))
+      (let [wt (:worktree (b/load-card board card-id))
+            inbox-path (u/path-resolve wt ".kb-inbox.jsonl")
+            line (json/generate-string {"ts" (u/now-epoch)
+                                        "role" "human"
+                                        "action" "note"
+                                        "content" message})]
+        (u/flock-append! inbox-path line)))
     (if (:json opts)
       (out-json {:status "ok"})
       (println (str "Note added to card " card-id)))))
@@ -194,22 +203,22 @@
   [{:keys [opts]}]
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
-        board   (b/make-board)
-        since   (when-let [s (:since opts)] (u/parse-since s))
+        board (b/make-board)
+        since (when-let [s (:since opts)] (u/parse-since s))
         history (b/load-history board card-id since)]
     (if (:json opts)
       (out-json history)
       (if (empty? history)
         (println "No history.")
         (doseq [entry history]
-          (let [ts       (u/fmt-ts (get entry :ts 0))
-                role     (get entry :role "?")
-                action   (get entry :action "?")
-                content  (get entry :content "")
+          (let [ts (u/fmt-ts (get entry :ts 0))
+                role (get entry :role "?")
+                action (get entry :action "?")
+                content (get entry :content "")
                 agent-id (get entry :agent_id "")
                 agent-str (if (str/blank? agent-id) "" (str " [" agent-id "]"))
-                gate      (get entry :gate "")
-                gate-str  (if (str/blank? gate) "" (str " (gate: " gate ")"))]
+                gate (get entry :gate "")
+                gate-str (if (str/blank? gate) "" (str " (gate: " gate ")"))]
             (println (str "  " ts "  " role "/" action agent-str gate-str ": " content))))))))
 
 (defn cmd-diff
@@ -217,9 +226,9 @@
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)
-        diff  (if (:stat opts)
-                (b/get-diff-stat board card-id)
-                (b/get-diff board card-id))]
+        diff (if (:stat opts)
+               (b/get-diff-stat board card-id)
+               (b/get-diff board card-id))]
     (if (:json opts)
       (out-json {:diff diff})
       (println diff))))
@@ -228,19 +237,19 @@
   [{:keys [opts]}]
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
-        board     (b/make-board)
-        card      (b/load-card board card-id)
-        desc      (b/load-description board card-id)
-        history   (b/load-history board card-id)
+        board (b/make-board)
+        card (b/load-card board card-id)
+        desc (b/load-description board card-id)
+        history (b/load-history board card-id)
         diff-stat (b/get-diff-stat board card-id)]
     (if (:json opts)
-      (out-json {:card        card
+      (out-json {:card card
                  :description desc
-                 :history     history
-                 :diff_stat   diff-stat})
+                 :history history
+                 :diff_stat diff-stat})
       (do
         (println)
-        (println (str (apply str (repeat 60 "=")) ))
+        (println (str (apply str (repeat 60 "="))))
         (println (str "  Card " (:id card) ": " (:title card)))
         (println (str (apply str (repeat 60 "="))))
         (println (str "  Lane:     " (:lane card)))
@@ -257,6 +266,10 @@
                                        "(none)")))
         (println (str "  Created:  " (u/fmt-ts (:created-at card))))
         (println (str "  Updated:  " (u/fmt-ts (:updated-at card))))
+        (when (and (:pending-question card) (not (str/blank? (:pending-question card))))
+          (println (str "  Question: " (:pending-question card))))
+        (when (:last-heartbeat card)
+          (println (str "  Heartbeat: " (u/fmt-ts (:last-heartbeat card)))))
 
         (when (not (str/blank? desc))
           (println)
@@ -276,9 +289,9 @@
         (println (str "  History (" (count history) " entries):"))
         (let [recent (if (> (count history) 15) (drop (- (count history) 15) history) history)]
           (doseq [entry recent]
-            (let [ts      (u/fmt-ts (get entry :ts 0))
-                  role    (get entry :role "?")
-                  action  (get entry :action "?")
+            (let [ts (u/fmt-ts (get entry :ts 0))
+                  role (get entry :role "?")
+                  action (get entry :action "?")
                   content (get entry :content "")]
               (println (str "    " ts "  " role "/" action ": " content))))
           (when (> (count history) 15)
@@ -302,24 +315,25 @@
                       " \u2014 " (b/base-branch board)))
         (println)
         (doseq [lane-conf (b/lanes board)]
-          (let [name       (get lane-conf "name")
+          (let [name (get lane-conf "name")
                 lane-cards (sort-by (juxt :priority :created-at)
                                     (filterv #(= (:lane %) name) cards))
-                max-wip    (get lane-conf "max_wip" "\u221e")
-                max-par    (get lane-conf "max_parallelism" "\u221e")
-                header     (str "\u2500\u2500 " (str/upper-case name)
-                                " (" (count lane-cards) "/" max-wip ")"
-                                " [par: " max-par "] ")]
+                max-wip (get lane-conf "max_wip" "\u221e")
+                max-par (get lane-conf "max_parallelism" "\u221e")
+                header (str "\u2500\u2500 " (str/upper-case name)
+                            " (" (count lane-cards) "/" max-wip ")"
+                            " [par: " max-par "] ")]
             (println (str header (apply str (repeat (max 0 (- 60 (count header))) "\u2500"))))
             (if (empty? lane-cards)
               (println "  (empty)")
               (doseq [c lane-cards]
                 (let [flags (cond-> []
-                              (:blocked c)          (conj "BLOCKED")
-                              (:pending-approval c)  (conj "PENDING APPROVAL")
+                              (:blocked c) (conj "BLOCKED")
+                              (:pending-approval c) (conj "PENDING APPROVAL")
+                              (and (:pending-question c) (not (str/blank? (:pending-question c)))) (conj "QUESTION")
                               (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
-                              (not (str/blank? (:branch c "")))         (conj (:branch c))
-                              (seq (:tags c))                           (conj (str/join " " (map #(str "#" %) (:tags c)))))
+                              (not (str/blank? (:branch c ""))) (conj (:branch c))
+                              (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c)))))
                       flag-str (if (seq flags)
                                  (str "  (" (str/join ", " flags) ")")
                                  "")]
@@ -344,13 +358,13 @@
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)
-        card  (b/load-card board card-id)]
+        card (b/load-card board card-id)]
     (when (str/blank? (:worktree card ""))
       (fail! (str "card " (:id card) " has no worktree. "
-                "Pull the card first with `kb pull` to create a worktree.")))
+                  "Pull the card first with `kb pull` to create a worktree.")))
     (when-not (.exists (io/file (:worktree card)))
       (fail! (str "worktree path '" (:worktree card) "' does not exist. "
-                "The worktree may have been removed. Run `kb cleanup` and then `kb pull` to recreate it.")))
+                  "The worktree may have been removed. Run `kb cleanup` and then `kb pull` to recreate it.")))
     (spawn-agent board card)))
 
 (defn cmd-cleanup
@@ -365,19 +379,19 @@
 
 (defn cmd-recover
   [{:keys [opts]}]
-  (let [board  (b/make-board)
+  (let [board (b/make-board)
         result (b/recover! board
-                           :clean           (boolean (:clean opts))
+                           :clean (boolean (:clean opts))
                            :delete-branches (boolean (:delete-branches opts)))]
     (if (:json opts)
       (out-json result)
-      (let [orphaned-wts      (get result :orphaned_worktrees [])
-            stale-refs        (get result :stale_card_refs [])
+      (let [orphaned-wts (get result :orphaned_worktrees [])
+            stale-refs (get result :stale_card_refs [])
             orphaned-branches (get result :orphaned_branches [])
-            cleaned           (get result :cleaned [])
-            total             (+ (count orphaned-wts)
-                                 (count stale-refs)
-                                 (count orphaned-branches))]
+            cleaned (get result :cleaned [])
+            total (+ (count orphaned-wts)
+                     (count stale-refs)
+                     (count orphaned-branches))]
         (if (and (zero? total) (empty? cleaned))
           (println "No orphaned resources found. Board is clean.")
           (do
@@ -428,11 +442,123 @@
 
 (defn cmd-serve
   [{:keys [opts]}]
-  ;; Require server at runtime to avoid issues if not available
   (require '[kb.server :as srv])
   ((resolve 'kb.server/run-server)
    {:host (or (:host opts) "127.0.0.1")
     :port (or (:port opts) 8741)}))
+
+(defn cmd-gates
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)
+        gates (b/gates-for-card board card-id)]
+    (if (:json opts)
+      (out-json gates)
+      (if (empty? gates)
+        (println "No gates between current lane and the next lane.")
+        (do
+          (println (str "Gates for card " card-id " (moving to " (:target-lane (first gates)) "):"))
+          (doseq [g gates]
+            (println (str "  - `" (:gate g) "`"))))))))
+
+(defn cmd-ask
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        question (:question opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        _ (when (str/blank? question) (fail! "question is required"))
+        board (b/make-board)
+        card (b/ask! board card-id question :agent (or (:agent opts) ""))]
+    (if (:json opts)
+      (out-json card)
+      (println (str "Asked on card " (:id card) ": " question)))))
+
+(defn cmd-answer
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        answer-text (:answer opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        _ (when (str/blank? answer-text) (fail! "answer is required"))
+        board (b/make-board)]
+    (try
+      (let [card (b/answer! board card-id answer-text :agent (or (:agent opts) "human"))]
+        (when (and (:worktree card)
+                   (not (str/blank? (:worktree card)))
+                   (u/path-exists? (u/->path (:worktree card))))
+          (let [inbox-path (u/path-resolve (:worktree card) ".kb-inbox.jsonl")
+                line (json/generate-string {"ts" (u/now-epoch)
+                                            "role" "human"
+                                            "action" "answer"
+                                            "content" answer-text})]
+            (u/flock-append! inbox-path line)))
+        (if (:json opts)
+          (out-json card)
+          (println (str "Answered card " (:id card) ": " answer-text))))
+      (catch Exception e
+        (fail! (.getMessage e))))))
+
+(defn cmd-advance
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)
+        [success? message gate-results] (b/advance! board card-id :agent (:agent opts ""))]
+    (if (:json opts)
+      (out-json {:success success? :message message :gate_results gate-results})
+      (if success?
+        (println (str "\u2713 " message))
+        (do
+          (binding [*out* *err*]
+            (println (str "\u2717 " message)))
+          (System/exit 1))))))
+
+(defn cmd-done
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)
+        [success? message gate-results] (b/done! board card-id :agent (:agent opts ""))]
+    (if (:json opts)
+      (out-json {:success success? :message message :gate_results gate-results})
+      (if success?
+        (println (str "\u2713 " message))
+        (do
+          (binding [*out* *err*]
+            (println (str "\u2717 " message)))
+          (System/exit 1))))))
+
+(defn cmd-edit
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)]
+    (try
+      (let [card (b/edit-card! board card-id
+                               :title (:title opts)
+                               :priority (when-let [p (:priority opts)] (if (integer? p) p (Integer/parseInt (str p))))
+                               :description (:desc opts)
+                               :tags (when-let [t (:tags opts)]
+                                       (if (str/blank? t) []
+                                           (mapv str/trim (str/split t #",")))))]
+        (if (:json opts)
+          (out-json card)
+          (println (str "Edited card " card-id))))
+      (catch Exception e
+        (fail! (.getMessage e))))))
+
+(defn cmd-heartbeat
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)]
+    (try
+      (let [card (b/heartbeat! board card-id :agent (or (:agent opts) ""))]
+        (if (:json opts)
+          (out-json card)
+          (println (str "Heartbeat recorded for card " card-id))))
+      (catch Exception e
+        (fail! (.getMessage e))))))
 
 (defn cmd-help
   [_]
@@ -443,14 +569,21 @@
   (println "  add      <title> [opts]                 Add a card to the board")
   (println "  pull     [opts]                         Pull next available card")
   (println "  move     <card-id> <lane> [opts]        Move a card to a lane (runs gates)")
+  (println "  advance  <card-id> [opts]              Move card to next lane (runs gates)")
+  (println "  done     <card-id> [opts]              Move card to final lane (runs all gates)")
   (println "  reject   <card-id> [opts]               Reject a card back to previous lane")
   (println "  block    <card-id> [opts]               Block a card")
   (println "  unblock  <card-id> [opts]               Unblock a card")
   (println "  approve  <card-id> [opts]               Approve a card pending approval")
+  (println "  ask      <card-id> <question> [opts]    Ask the human a question (blocks card)")
+  (println "  answer   <card-id> <answer> [opts]     Answer a pending question (unblocks card)")
   (println "  note     <card-id> <message> [opts]     Add a note to a card")
   (println "  log      <card-id> [opts]               Show card history")
   (println "  diff     <card-id> [opts]               Show card diff vs base branch")
   (println "  show     <card-id> [opts]               Show card details")
+  (println "  gates    <card-id> [opts]               Show gates for the next lane transition")
+  (println "  edit     <card-id> [opts]               Edit card title, priority, description, or tags")
+  (println "  heartbeat <card-id> [opts]              Record an agent heartbeat")
   (println "  status   [opts]                         Show board status")
   (println "  context  <card-id> [opts]               Output card context for agent prompt")
   (println "  spawn    <card-id>                      Spawn a sub-agent for a card")
@@ -462,25 +595,32 @@
 ;; ── Dispatch table ────────────────────────────────────────────
 
 (def dispatch-table
-  [{:cmds ["init"]    :fn cmd-init    :args->opts [:path]}
-   {:cmds ["add"]     :fn cmd-add     :args->opts [:title]}
-   {:cmds ["pull"]    :fn cmd-pull}
-   {:cmds ["move"]    :fn cmd-move    :args->opts [:card-id :lane]}
-   {:cmds ["reject"]  :fn cmd-reject  :args->opts [:card-id]}
-   {:cmds ["block"]   :fn cmd-block   :args->opts [:card-id]}
+  [{:cmds ["init"] :fn cmd-init :args->opts [:path]}
+   {:cmds ["add"] :fn cmd-add :args->opts [:title]}
+   {:cmds ["pull"] :fn cmd-pull}
+   {:cmds ["move"] :fn cmd-move :args->opts [:card-id :lane]}
+   {:cmds ["advance"] :fn cmd-advance :args->opts [:card-id]}
+   {:cmds ["done"] :fn cmd-done :args->opts [:card-id]}
+   {:cmds ["reject"] :fn cmd-reject :args->opts [:card-id]}
+   {:cmds ["block"] :fn cmd-block :args->opts [:card-id]}
    {:cmds ["unblock"] :fn cmd-unblock :args->opts [:card-id]}
    {:cmds ["approve"] :fn cmd-approve :args->opts [:card-id]}
-   {:cmds ["note"]    :fn cmd-note    :args->opts [:card-id :message]}
-   {:cmds ["log"]     :fn cmd-log     :args->opts [:card-id]}
-   {:cmds ["diff"]    :fn cmd-diff    :args->opts [:card-id]}
-   {:cmds ["show"]    :fn cmd-show    :args->opts [:card-id]}
-   {:cmds ["status"]  :fn cmd-status}
+   {:cmds ["ask"] :fn cmd-ask :args->opts [:card-id :question]}
+   {:cmds ["answer"] :fn cmd-answer :args->opts [:card-id :answer]}
+   {:cmds ["note"] :fn cmd-note :args->opts [:card-id :message]}
+   {:cmds ["log"] :fn cmd-log :args->opts [:card-id]}
+   {:cmds ["diff"] :fn cmd-diff :args->opts [:card-id]}
+   {:cmds ["show"] :fn cmd-show :args->opts [:card-id]}
+   {:cmds ["gates"] :fn cmd-gates :args->opts [:card-id]}
+   {:cmds ["edit"] :fn cmd-edit :args->opts [:card-id]}
+   {:cmds ["heartbeat"] :fn cmd-heartbeat :args->opts [:card-id]}
+   {:cmds ["status"] :fn cmd-status}
    {:cmds ["context"] :fn cmd-context :args->opts [:card-id]}
-   {:cmds ["spawn"]   :fn cmd-spawn   :args->opts [:card-id]}
+   {:cmds ["spawn"] :fn cmd-spawn :args->opts [:card-id]}
    {:cmds ["cleanup"] :fn cmd-cleanup :args->opts [:card-id]}
-   {:cmds ["serve"]   :fn cmd-serve}
+   {:cmds ["serve"] :fn cmd-serve}
    {:cmds ["recover"] :fn cmd-recover}
-   {:cmds []          :fn cmd-help}])
+   {:cmds [] :fn cmd-help}])
 
 ;; ── Entry point ───────────────────────────────────────────────
 
