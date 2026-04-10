@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --bg-0: #0a0c0f;
+  --bg-1: #10131a;
+  --bg-2: #181c26;
+  --bg-3: #1f2533;
+  --border: #2a3040;
+  --border-hi: #3a4560;
+  --text-0: #e8ecf4;
+  --text-1: #a0aabe;
+  --text-2: #6b7590;
+  --accent: #4aefb5;
+  --accent-dim: #2a8f6a;
+  --accent-glow: rgba(74, 239, 181, 0.15);
+  --warn: #f0a050;
+  --warn-dim: #905820;
+  --danger: #ef5a5a;
+  --danger-dim: #8f2a2a;
+  --blue: #5a9ef0;
+  --blue-dim: #2a4a8f;
+  --purple: #a07aef;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+  --radius: 6px;
+  --lane-gap: 12px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; overflow: hidden; }
+
+body {
+  font-family: var(--sans);
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }

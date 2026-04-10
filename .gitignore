@@ -1,0 +1,8 @@
+.kanban/
+.claude/
+.playwright-mcp/
+.tmp/
+chrome/
+node_modules/
+*.pyc
+__pycache__/
