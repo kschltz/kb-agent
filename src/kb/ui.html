@@ -335,6 +335,11 @@ body::before {
   border: 1px solid var(--danger-dim);
   color: var(--danger);
 }
+.badge-unblocked {
+  background: rgba(80, 200, 120, 0.1);
+  border: 1px solid rgba(80, 200, 120, 0.3);
+  color: #50c878;
+}
 .badge-branch {
   background: rgba(90, 158, 240, 0.08);
   border: 1px solid var(--blue-dim);
@@ -419,6 +424,14 @@ body::before {
 .detail-section {
   margin-bottom: 20px;
 }
+.detail-description {
+  font-size: calc(13px * var(--font-scale, 1));
+  color: var(--text);
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.text-danger { color: var(--danger); }
+.text-success { color: #50c878; }
 .detail-section-title {
   font-family: var(--mono);
   font-size: 10px;
@@ -840,6 +853,21 @@ function connect() {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'state') {
       boardState = msg.data;
+      // Normalize kebab-case keys to camelCase for consistent JS access
+      for (const lane of boardState.lanes) {
+        for (const card of lane.cards) {
+          if (card['depends-on'] !== undefined) { card.depends_on = card['depends-on']; delete card['depends-on']; }
+          if (card['assigned-agent'] !== undefined) { card.assigned_agent = card['assigned-agent']; delete card['assigned-agent']; }
+          if (card['blocked-reason'] !== undefined) { card.blocked_reason = card['blocked-reason']; delete card['blocked-reason']; }
+          if (card['pending-question'] !== undefined) { card.pending_question = card['pending-question']; delete card['pending-question']; }
+          if (card['last-heartbeat'] !== undefined) { card.last_heartbeat = card['last-heartbeat']; delete card['last-heartbeat']; }
+          if (card['pending-approval'] !== undefined) { card.pending_approval = card['pending-approval']; delete card['pending-approval']; }
+          if (card['approved-by'] !== undefined) { card.approved_by = card['approved-by']; delete card['approved-by']; }
+          if (card['diff_stat'] !== undefined) { card.diff_stat = card['diff_stat']; }
+          if (card['created-at'] !== undefined) { card.created_at = card['created-at']; }
+          if (card['updated-at'] !== undefined) { card.updated_at = card['updated-at']; }
+        }
+      }
       render();
       if (selectedCard) refreshDetail();
     } else if (msg.type === 'result') {
@@ -965,6 +993,21 @@ function renderCard(card) {
   let badges = '';
   if (card.assigned_agent) badges += `<span class="badge badge-agent">● ${esc(card.assigned_agent)}</span>`;
   if (card.blocked) badges += `<span class="badge badge-blocked">⊘ blocked</span>`;
+  if (card.depends_on && card.depends_on.length) {
+    const unsatisfied = card.depends_on.filter(depId => {
+      for (const lane of boardState.lanes) {
+        for (const c of lane.cards) {
+          if (c.id === depId && lane.name !== 'done') return true;
+        }
+      }
+      return false;
+    });
+    if (unsatisfied.length > 0) {
+      badges += `<span class="badge badge-blocked" title="Waiting on: ${unsatisfied.join(', ')}">⇢ ${unsatisfied.length} dep${unsatisfied.length > 1 ? 's' : ''}</span>`;
+    } else {
+      badges += `<span class="badge badge-unblocked" title="All dependencies satisfied">✓ ready</span>`;
+    }
+  }
   if (card.branch) badges += `<span class="badge badge-branch" title="${esc(card.branch)}">${esc(card.branch.replace('kb/', ''))}</span>`;
   if (card.diff_stat && card.diff_stat.trim()) badges += `<span class="badge badge-diff">Δ</span>`;
 
@@ -1020,15 +1063,45 @@ function refreshDetail() {
   const body = document.getElementById('detail-body');
   body.innerHTML = '';
 
+  // Description
+  if (card.description && card.description.trim()) {
+    const descSec = document.createElement('div');
+    descSec.className = 'detail-section';
+    descSec.innerHTML = `
+      <div class="detail-section-title">Description</div>
+      <div class="detail-description">${esc(card.description.trim())}</div>
+    `;
+    body.appendChild(descSec);
+  }
+
   // Meta
   const meta = document.createElement('div');
   meta.className = 'detail-section';
+
+  let depStatusHtml = '';
+  if (card.depends_on && card.depends_on.length) {
+    const unsatisfied = card.depends_on.filter(depId => {
+      for (const lane of boardState.lanes) {
+        for (const c of lane.cards) {
+          if (c.id === depId && lane.name !== 'done') return true;
+        }
+      }
+      return false;
+    });
+    if (unsatisfied.length > 0) {
+      depStatusHtml = `<dt>Dependencies</dt><dd class="text-danger">⇢ ${unsatisfied.length} unsatisfied (${unsatisfied.join(', ')})</dd>`;
+    } else {
+      depStatusHtml = `<dt>Dependencies</dt><dd class="text-success">✓ all satisfied (${card.depends_on.join(', ')})</dd>`;
+    }
+  }
+
   meta.innerHTML = `
     <div class="detail-section-title">Details</div>
     <dl class="detail-meta-grid">
       <dt>Lane</dt><dd>${esc(card.lane)}</dd>
       <dt>Priority</dt><dd>${card.priority}</dd>
       <dt>Blocked</dt><dd>${card.blocked ? `Yes — ${esc(card.blocked_reason)}` : 'No'}</dd>
+      ${depStatusHtml}
       <dt>Agent</dt><dd>${card.assigned_agent || '—'}</dd>
       <dt>Branch</dt><dd>${card.branch || '—'}</dd>
       <dt>Created</dt><dd>${fmtFull(card.created_at)}</dd>

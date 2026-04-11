@@ -1430,15 +1430,21 @@
                          deps-output))
 
                   :else
-                  (-> [(str "# Task: " (:title card))
-                       (str "Card ID: " (:id card))
-                       (str "Lane: " (:lane card))
-                       (str "Branch: " (:branch card))
-                       (str "Worktree: " (:worktree card))
-                       (str "Base branch: " base)
-                       ""]
-                      (into (when (not (str/blank? desc))
-                               ["## Description" "" (str/trim desc) ""]))
+                  (let [usdeps    (unsatisfied-deps board card)
+                        dep-status (if (seq usdeps)
+                                     (str "BLOCKED — " (count usdeps) " unsatisfied dependenc"
+                                           (if (= 1 (count usdeps)) "y" "ies"))
+                                     "UNBLOCKED — all dependencies satisfied")]
+                    (-> [(str "# Task: " (:title card))
+                         (str "Card ID: " (:id card))
+                         (str "Lane: " (:lane card))
+                         (str "Status: " dep-status)
+                         (str "Branch: " (:branch card))
+                         (str "Worktree: " (:worktree card))
+                         (str "Base branch: " base)
+                         ""]
+                        (into (when (not (str/blank? desc))
+                                 ["## Description" "" (str/trim desc) ""]))
                       (into gates-output)
                       (into (when last-gfail
                                ["## Last gate failure" ""
@@ -1472,7 +1478,7 @@
                                      (mapv #(str "- [" (:id %) "] " (:title %)
                                                  " — " (:blocked-reason %))
                                            blocked-cards))))
-                      (into history-lines)))]
+                      (into history-lines))))]
 
       ;; Apply budget trimming if configured
       (let [final-lines (if budget

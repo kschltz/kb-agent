@@ -61,9 +61,11 @@
                                      "cards"
                                      (mapv (fn [card]
                                              (let [history   (board/load-history b (:id card))
-                                                   diff-stat (board/get-diff-stat b (:id card))]
+                                                   diff-stat (board/get-diff-stat b (:id card))
+                                                   desc      (board/load-description b (:id card))]
                                                (assoc card
-                                                      :history   history
+                                                      :history     history
+                                                      :description desc
                                                       :diff_stat (if (str/includes? diff-stat "(no branch)")
                                                                    ""
                                                                    diff-stat))))

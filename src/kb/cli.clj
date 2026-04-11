@@ -58,6 +58,36 @@
         (catch Exception _
           (println "\nAgent interrupted."))))))
 
+(defn- spawn-agent-bg
+  "Spawn a sub-agent for a card in a background process.
+   Returns a map with :card-id, :title, :worktree, and :process."
+  [board card]
+  (let [cmd-template (get (:config board) "agent_command" "")]
+    (when (str/blank? cmd-template)
+      (fail! (str "no agent_command template configured in board.yaml.")))
+    (let [cmd (-> cmd-template
+                  (str/replace "{card_id}" (or (:id card) ""))
+                  (str/replace "{worktree}" (or (:worktree card) "."))
+                  (str/replace "{branch}" (or (:branch card) "")))]
+      (b/append-history! board (:id card)
+                         {:ts (u/now-epoch)
+                          :role "system"
+                          :action "spawned"
+                          :content (str "Sub-agent spawned (parallel): " cmd)})
+      (try
+        (let [p (proc/process {:dir (or (:worktree card) ".")
+                                :out :capture
+                                :err :capture}
+                               cmd)]
+          {:card-id (:id card)
+           :title (:title card)
+           :worktree (:worktree card)
+           :process p})
+        (catch Exception e
+          {:card-id (:id card)
+           :title (:title card)
+           :error (.getMessage e)})))))
+
 ;; ── Command handlers ──────────────────────────────────────────
 
 (defn cmd-init
@@ -281,7 +311,16 @@
         (when (:last-heartbeat card)
           (println (str "  Heartbeat: " (u/fmt-ts (:last-heartbeat card)))))
         (when (seq (:depends-on card))
-          (println (str "  Depends on: " (str/join ", " (:depends-on card)))))
+          (let [usdeps (b/unsatisfied-deps board card)]
+            (println (str "  Depends on: " (str/join ", " (:depends-on card))))
+            (when (seq usdeps)
+              (println (str "  Status:     BLOCKED — " (count usdeps) " unsatisfied dependenc"
+                             (if (= 1 (count usdeps)) "y" "ies")))
+              (doseq [dep-id usdeps]
+                (let [dep-card (b/load-card board dep-id)]
+                  (println (str "    - [" dep-id "] " (:title dep-card) " (" (:lane dep-card) ")")))))
+            (when (empty? usdeps)
+              (println "  Status:     UNBLOCKED — all dependencies satisfied"))))
 
         (when (not (str/blank? desc))
           (println)
@@ -448,6 +487,52 @@
       (fail! (str "worktree path '" (:worktree card) "' does not exist. "
                   "The worktree may have been removed. Run `kb cleanup` and then `kb pull` to recreate it.")))
     (spawn-agent board card)))
+
+(defn cmd-spawn-parallel
+  "Pull N available cards and spawn agents for each in parallel."
+  [{:keys [opts]}]
+  (let [n       (or (:count opts) 2)
+        lane    (:lane opts)
+        agent   (or (:agent opts) "claude")
+        board   (b/make-board)
+        pulled  (atom [])]
+    ;; Pull up to n cards
+    (dotimes [_ n]
+      (let [card (b/pull! board :agent agent :lane lane)]
+        (when card
+          (swap! pulled conj card))))
+    (when (empty? @pulled)
+      (println "No cards available to pull.")
+      (when (:json opts) (out-json {:spawned []}))
+      (System/exit 1))
+    ;; Spawn agents for all pulled cards in background
+    (let [procs (doall
+                  (for [card @pulled]
+                    (spawn-agent-bg board card)))]
+      (println (str "Spawned " (clojure.core/count @pulled) " agent(s) in parallel:"))
+      (doseq [p procs]
+        (if (:error p)
+          (println (str "  [FAIL] " (:card-id p) ": " (:title p) " — " (:error p)))
+          (println (str "  [OK]   " (:card-id p) ": " (:title p)
+                        " (worktree: " (:worktree p) ")"))))
+      ;; Wait for all processes to complete
+      (println "\nWaiting for all agents to finish...")
+      (let [results (doall
+                      (for [p procs]
+                        (if (:process p)
+                          (let [result @(:process p)
+                                exit-code (:exit result)]
+                            (assoc p :exit-code exit-code))
+                          p)))]
+        (println "\nAll agents completed:")
+        (doseq [r results]
+          (if (:error r)
+            (println (str "  [FAIL] " (:card-id r) ": " (:error r)))
+            (let [status (if (zero? (:exit-code r -1)) "OK" "FAIL")]
+              (println (str "  [" status "] " (:card-id r) ": " (:title r)
+                            " (exit: " (:exit-code r "n/a") ")"))))))
+      (when (:json opts)
+        (out-json {:spawned (mapv #(select-keys % [:card-id :title :worktree]) @pulled)})))))
 
 (defn cmd-cleanup
   [{:keys [opts]}]
@@ -746,6 +831,13 @@
            :deps-only {:desc "Only show dependency information for the card"
                        :type :bool}}}
    {:cmds ["spawn"] :fn cmd-spawn :args->opts [:card-id]}
+   {:cmds ["spawn-parallel"] :fn cmd-spawn-parallel
+    :spec {:count {:desc "Number of agents to spawn (default: 2)"
+                   :type :number :alias \n}
+           :lane {:desc "Pull from a specific lane"
+                  :type :string :alias \l}
+           :agent {:desc "Agent name to assign"
+                    :type :string :alias \a}}}
    {:cmds ["cleanup"] :fn cmd-cleanup :args->opts [:card-id]}
    {:cmds ["link"] :fn cmd-link :args->opts [:card-id :dep-id]}
    {:cmds ["unlink"] :fn cmd-unlink :args->opts [:card-id :dep-id]}
