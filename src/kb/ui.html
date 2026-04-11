@@ -30,6 +30,7 @@
   --sans: 'IBM Plex Sans', sans-serif;
   --radius: 6px;
   --lane-gap: 12px;
+  --font-scale: 1;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
@@ -37,7 +38,7 @@ body {
   font-family: var(--sans);
   background: var(--bg-0);
   color: var(--text-0);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   line-height: 1.5;
 }
 
@@ -140,6 +141,35 @@ body::before {
   border-color: var(--accent-dim);
 }
 
+/* ── Font size control ── */
+.font-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.font-btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.font-btn:hover {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+.font-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  min-width: 32px;
+  text-align: center;
+}
+
 /* ── Board ── */
 .board {
   display: flex;
@@ -153,8 +183,7 @@ body::before {
 /* ── Lane ── */
 .lane {
   flex: 1;
-  min-width: 260px;
-  max-width: 400px;
+  min-width: 220px;
   display: flex;
   flex-direction: column;
   background: var(--bg-1);
@@ -256,7 +285,14 @@ body::before {
   font-weight: 500;
   font-size: 13px;
   color: var(--text-0);
+  margin-bottom: 2px;
+  word-break: break-word;
+}
+.card-summary {
+  font-size: 11px;
+  color: var(--text-2);
   margin-bottom: 6px;
+  line-height: 1.35;
   word-break: break-word;
 }
 .card-tags {
@@ -487,6 +523,55 @@ body::before {
 .diff-block .hunk { color: var(--purple); }
 .diff-block .file { color: var(--blue); font-weight: 600; }
 
+/* ── Diff stat visualization ── */
+.diff-stat-visual {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.diff-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.diff-stat-file {
+  flex: 1;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.diff-stat-bar {
+  display: inline-flex;
+  height: 8px;
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.diff-stat-add {
+  display: inline-block;
+  background: var(--accent);
+  border-radius: 2px 0 0 2px;
+  height: 100%;
+}
+.diff-stat-del {
+  display: inline-block;
+  background: var(--danger);
+  border-radius: 0 2px 2px 0;
+  height: 100%;
+}
+.diff-stat-num {
+  flex-shrink: 0;
+  min-width: 60px;
+  text-align: right;
+  font-size: 10px;
+}
+.diff-add-count { color: var(--accent); }
+.diff-del-count { color: var(--danger); }
+
 /* ── Actions bar ── */
 .detail-actions {
   padding: 12px 20px;
@@ -674,6 +759,11 @@ body::before {
       <span class="branch-badge" id="branch-badge">—</span>
     </div>
     <div class="header-right">
+      <div class="font-ctrl">
+        <button class="font-btn" id="font-dec" title="Decrease font size">A-</button>
+        <span class="font-label" id="font-label">100%</span>
+        <button class="font-btn" id="font-inc" title="Increase font size">A+</button>
+      </div>
       <button class="btn-add" id="btn-add-card">+ add card</button>
       <div class="status-led" id="status-led"></div>
       <span class="status-text" id="status-text">connecting</span>
@@ -883,9 +973,16 @@ function renderCard(card) {
     tags = '<div class="card-tags">' + card.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('') + '</div>';
   }
 
+  let summary = '';
+  if (card.description && card.description.trim()) {
+    const firstLine = card.description.trim().split('\n')[0].replace(/^#+\s*/, '');
+    summary = `<div class="card-summary">${esc(firstLine.slice(0, 120))}${firstLine.length > 120 ? '…' : ''}</div>`;
+  }
+
   el.innerHTML = `
     <div class="card-id">#${esc(card.id)}</div>
     <div class="card-title">${esc(card.title)}</div>
+    ${summary}
     ${tags}
     <div class="card-meta">${badges}</div>
   `;
@@ -946,25 +1043,33 @@ function refreshDetail() {
     diffSec.className = 'detail-section';
     diffSec.innerHTML = `
       <div class="detail-section-title">Changes</div>
-      <div class="diff-block">${esc(card.diff_stat)}</div>
+      <div class="diff-stat-visual">${renderDiffStat(card.diff_stat)}</div>
+      <div class="diff-block" style="display:none">${esc(card.diff_stat)}</div>
     `;
     const viewBtn = document.createElement('button');
     viewBtn.className = 'btn btn-accent';
     viewBtn.style.marginTop = '8px';
     viewBtn.textContent = 'View full diff';
     viewBtn.onclick = () => {
-      send({ action: 'diff', card_id: card.id });
-      // listen for result
-      const origHandler = ws.onmessage;
-      ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'result' && msg.data.diff !== undefined) {
-          showFullDiff(msg.data.diff, diffSec);
-          ws.onmessage = origHandler;
-        } else {
-          origHandler(ev);
-        }
-      };
+      const block = diffSec.querySelector('.diff-block');
+      const vis = diffSec.querySelector('.diff-stat-visual');
+      if (block.style.display === 'none') {
+        send({ action: 'diff', card_id: card.id });
+        const origHandler = ws.onmessage;
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'result' && msg.data.diff !== undefined) {
+            showFullDiff(msg.data.diff, diffSec);
+            ws.onmessage = origHandler;
+          } else {
+            origHandler(ev);
+          }
+        };
+      } else {
+        vis.style.display = '';
+        block.style.display = 'none';
+        viewBtn.textContent = 'View full diff';
+      }
     };
     diffSec.appendChild(viewBtn);
     body.appendChild(diffSec);
@@ -1076,12 +1181,40 @@ function refreshDetail() {
 }
 
 function showFullDiff(diff, container) {
-  // replace the diff stat block with full colored diff
   const existing = container.querySelector('.diff-block');
+  const vis = container.querySelector('.diff-stat-visual');
   if (existing) {
     existing.innerHTML = colorDiff(diff);
     existing.style.maxHeight = '600px';
+    existing.style.display = '';
   }
+  if (vis) vis.style.display = 'none';
+  const btn = container.querySelector('.btn-accent');
+  if (btn) btn.textContent = 'Show stat view';
+}
+
+function renderDiffStat(statText) {
+  // Parse git diff --stat lines like:
+  //  src/kb/board.clj | 18 +++++++++++++++---
+  const lines = statText.trim().split('\n').filter(l => l.includes('|'));
+  return lines.map(line => {
+    const match = line.match(/^(.+?)\s*\|\s*(\d+)\s*(\+*)(-*)/);
+    if (!match) return `<div class="diff-stat-row">${esc(line)}</div>`;
+    const [, file, total, adds, dels] = match;
+    const addCount = adds.length;
+    const delCount = dels.length;
+    const maxBar = 40;
+    const totalChanges = addCount + delCount;
+    const addWidth = totalChanges > 0 ? Math.round((addCount / totalChanges) * maxBar) : 0;
+    const delWidth = maxBar - addWidth;
+    return `<div class="diff-stat-row">
+      <span class="diff-stat-file">${esc(file.trim())}</span>
+      <span class="diff-stat-bar">
+        <span class="diff-stat-add" style="width:${addWidth}ch"></span><span class="diff-stat-del" style="width:${delWidth}ch"></span>
+      </span>
+      <span class="diff-stat-num">${addCount > 0 ? `<span class="diff-add-count">+${addCount}</span>` : ''}${delCount > 0 ? `<span class="diff-del-count">-${delCount}</span>` : ''}</span>
+    </div>`;
+  }).join('');
 }
 
 function colorDiff(text) {
@@ -1145,6 +1278,27 @@ document.getElementById('add-modal').addEventListener('click', (e) => {
     document.getElementById('add-modal').classList.remove('open');
   }
 });
+
+// ── Font size control ─────────────────────────────────────────
+(function() {
+  const saved = localStorage.getItem('kb-font-scale');
+  let scale = saved ? parseFloat(saved) : 1;
+  const apply = () => {
+    document.documentElement.style.setProperty('--font-scale', scale);
+    document.getElementById('font-label').textContent = Math.round(scale * 100) + '%';
+  };
+  apply();
+  document.getElementById('font-inc').onclick = () => {
+    scale = Math.min(1.6, scale + 0.1);
+    localStorage.setItem('kb-font-scale', scale);
+    apply();
+  };
+  document.getElementById('font-dec').onclick = () => {
+    scale = Math.max(0.6, scale - 0.1);
+    localStorage.setItem('kb-font-scale', scale);
+    apply();
+  };
+})();
 
 // ── Boot ──────────────────────────────────────────────────────
 connect();

@@ -5,7 +5,8 @@
 (ns kb.test
   (:require [babashka.process :as proc]
             [clojure.string :as str]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [kb.board :as b]))
 
 (def pass (atom 0))
 (def fail (atom 0))
@@ -169,6 +170,34 @@
     (T "context has board summary" (str/includes? (txt r) "Board summary") "no board summary")
     (T "context has human notes" (str/includes? (txt r) "Recent human notes") "no human notes section"))
 
+  (println "\n== Context compaction ==")
+  (let [r (kb dir "context" "001" "--strategy" "summary")]
+    (T "context --strategy summary exits 0" (:ok r) "context --strategy summary failed")
+    (T "context summary has summary mode" (str/includes? (txt r) "summary mode") "no summary mode label"))
+  (let [r (kb dir "context" "001" "--strategy" "recent")]
+    (T "context --strategy recent exits 0" (:ok r) "context --strategy recent failed")
+    (T "context recent has last 10 label" (str/includes? (txt r) "last 10") "no recent label"))
+  (let [r (kb dir "context" "001" "--budget" "200")]
+    (T "context --budget exits 0" (:ok r) "context --budget failed"))
+  (let [r (kb dir "context" "001" "--compact" "--keep" "3")]
+    (T "context --compact exits 0" (:ok r) "context --compact failed")
+    (T "compact reports result" (or (str/includes? (txt r) "Compacted")
+                                    (str/includes? (txt r) "compact enough"))
+        "no compact result"))
+  ;; After compact, context should still work
+  (let [r (kb dir "context" "001")]
+    (T "context after compact exits 0" (:ok r) "context after compact failed"))
+
+  ;; Progressive context: --gates-only
+  (let [r (kb dir "context" "001" "--gates-only")]
+    (T "context --gates-only exits 0" (:ok r) "context --gates-only failed")
+    (T "context gates-only focused" (not (str/includes? (txt r) "## History")) "should not have full history")
+    (T "context gates-only has title" (str/includes? (txt r) "Fix auth v2") "title missing in gates-only"))
+
+  ;; Progressive context: --deps-only
+  (let [r (kb dir "context" "002" "--deps-only")]
+    (T "context --deps-only exits 0" (:ok r) "context --deps-only failed"))
+
   (println "\n== Reject ==")
   (kb dir "add" "Card to reject" "--lane" "in-progress")
   (let [r (kb dir "reject" "003" "--reason" "needs work")]
@@ -210,6 +239,248 @@
             (str "status from worktree missing cards: " (txt status-r))))))
 
   (println "\n== Worktree cleanup ==")
+  (cleanup dir))
+
+;; ── Notification hooks test ─────────────────────────────────────
+
+(let [dir (make-repo)]
+  (println "\n== Notification hooks ==")
+  (let [r (kb dir "init")]
+    (T "hooks: init exits 0" (:ok r) "init failed"))
+
+  ;; Configure a notification hook that writes to a temp file
+  (let [hook-file (str dir "/hook-output.txt")
+        board-yaml (str dir "/.kanban/board.yaml")
+        config (slurp board-yaml)]
+    (spit board-yaml (str config "\nnotifications:\n  hooks:\n    - event: blocked\n      command: \"echo 'BLOCKED:{card_id}:{reason}' >> " hook-file "\"\n    - event: unblocked\n      command: \"echo 'UNBLOCKED:{card_id}' >> " hook-file "\"\n    - event: ask\n      command: \"echo 'ASK:{card_id}:{question}' >> " hook-file "\"\n    - event: answer\n      command: \"echo 'ANSWER:{card_id}:{answer}' >> " hook-file "\"\n    - event: created\n      command: \"echo 'CREATED:{card_id}:{card_title}' >> " hook-file "\"\n"))
+    (let [r (kb dir "add" "Hook test card")]
+      (T "hooks: add exits 0" (:ok r) "add failed")
+      (T "hooks: add card id" (str/includes? (txt r) "001") "expected 001")
+      ;; Check that created hook fired
+      (let [hook-out (slurp hook-file)]
+        (T "hooks: created hook fired" (str/includes? hook-out "CREATED:001") "created hook not fired")
+        (T "hooks: created hook has title" (str/includes? hook-out "Hook test card") "created hook missing title")))
+
+    ;; Test block hook
+    (let [r (kb dir "block" "001" "--reason" "testing hooks")]
+      (T "hooks: block exits 0" (:ok r) "block failed")
+      (let [hook-out (slurp hook-file)]
+        (T "hooks: blocked hook fired" (str/includes? hook-out "BLOCKED:001") "blocked hook not fired")
+        (T "hooks: blocked hook has reason" (str/includes? hook-out "testing hooks") "blocked hook missing reason")))
+
+    ;; Test unblock hook
+    (let [r (kb dir "unblock" "001")]
+      (T "hooks: unblock exits 0" (:ok r) "unblock failed")
+      (let [hook-out (slurp hook-file)]
+        (T "hooks: unblocked hook fired" (str/includes? hook-out "UNBLOCKED:001") "unblocked hook not fired")))
+
+    ;; Test ask hook
+    (let [r (kb dir "ask" "001" "What framework?")]
+      (T "hooks: ask exits 0" (:ok r) "ask failed")
+      (let [hook-out (slurp hook-file)]
+        (T "hooks: ask hook fired" (str/includes? hook-out "ASK:001") "ask hook not fired")
+        (T "hooks: ask hook has question" (str/includes? hook-out "What framework") "ask hook missing question")))
+
+    ;; Test answer hook
+    (let [r (kb dir "answer" "001" "Use Jest")]
+      (T "hooks: answer exits 0" (:ok r) "answer failed")
+      (let [hook-out (slurp hook-file)]
+        (T "hooks: answer hook fired" (str/includes? hook-out "ANSWER:001") "answer hook not fired")
+        (T "hooks: answer hook has answer" (str/includes? hook-out "Use Jest") "answer hook missing answer"))))
+
+  (println "\n== Hook cleanup ==")
+  (cleanup dir))
+
+;; ── Approval timeout / reject-approval test ─────────────────────
+
+(let [dir (make-repo)]
+  (println "\n== Approval timeouts ==")
+  (let [r (kb dir "init")]
+    (T "at: init exits 0" (:ok r) "init failed"))
+
+  ;; Configure the review lane with requires_approval
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\n"
+                          "lanes:\n- name: backlog\n- name: in-progress\n  max_wip: 5\n"
+                          "- name: review\n  requires_approval: true\n  approval_timeout: 1s\n"
+                          "  approval_timeout_action: reject\n- name: done\n  on_enter: merge\n"))
+
+    ;; Add a card and move it to review (triggers requires_approval)
+    (kb dir "add" "Approval test card")
+    (kb dir "move" "001" "in-progress")
+    (let [r (kb dir "move" "001" "review")]
+      (T "at: move to review exits 0" (:ok r) "move to review failed")
+      (T "at: pending approval" (str/includes? (txt r) "awaiting approval") "should be pending approval"))
+
+    ;; Test approve --reject
+    (let [r (kb dir "approve" "001" "--reject" "--reason" "needs more work")]
+      (T "at: approve --reject exits 0" (:ok r) "reject approval failed")
+      (T "at: card rejected" (str/includes? (txt r) "Rejected") "should say rejected"))
+
+    ;; Verify card is back in in-progress
+    (let [s (kb dir "show" "001")]
+      (T "at: card back in in-progress" (str/includes? (txt s) "in-progress") "card not back in in-progress"))
+
+    ;; Move to review again and approve normally
+    (let [r (kb dir "move" "001" "review")]
+      (T "at: move to review again exits 0" (:ok r) "move to review again failed"))
+    (let [r (kb dir "approve" "001")]
+      (T "at: approve exits 0" (:ok r) "approve failed")
+      (T "at: card approved" (str/includes? (txt r) "Approved") "should say approved")))
+
+  (println "\n== Approval timeout cleanup ==")
+  (cleanup dir))
+
+;; ── Heartbeat timeout test ───────────────────────────────────────
+
+(let [dir (make-repo)]
+  (println "\n== Heartbeat timeouts ==")
+  (let [r (kb dir "init")]
+    (T "ht: init exits 0" (:ok r) "init failed"))
+
+  ;; Configure heartbeat_timeout on in-progress lane
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\n"
+                          "lanes:\n- name: backlog\n- name: in-progress\n  max_wip: 5\n"
+                          "  heartbeat_timeout: 1s\n- name: review\n  max_wip: 3\n"
+                          "- name: done\n  on_enter: merge\n"))
+
+    ;; Add a card and move to in-progress
+    (kb dir "add" "Heartbeat test card")
+    (kb dir "move" "001" "in-progress")
+
+    ;; Record a heartbeat
+    (let [r (kb dir "heartbeat" "001" "--agent" "test-bot")]
+      (T "ht: heartbeat exits 0" (:ok r) (str "heartbeat failed: " (txt r))))
+
+    ;; Wait for heartbeat to be stale (2 seconds since timeout is 1s)
+    (Thread/sleep 2000)
+
+    ;; Run the stale heartbeat check — make board pointing at the test .kanban dir
+    (let [board (b/make-board (str dir "/.kanban"))]
+      (let [stale (b/check-stale-heartbeats! board)]
+        (T "ht: stale heartbeat detected" (seq stale) "no stale heartbeats detected")))
+
+    ;; Card should now be blocked
+    (let [s (kb dir "show" "001")]
+      (T "ht: card blocked after timeout" (str/includes? (txt s) "Blocked:  true") "card not blocked after timeout")))
+
+  (println "\n== Heartbeat timeout cleanup ==")
+  (cleanup dir))
+
+;; ── Card dependencies test ─────────────────────────────────────────
+
+(let [dir (make-repo)]
+  (println "\n== Card dependencies ==")
+  (let [r (kb dir "init")]
+    (T "deps: init exits 0" (:ok r) "init failed"))
+
+  ;; Add two cards
+  (kb dir "add" "Foundation card")
+  (kb dir "add" "Dependent card")
+
+  ;; Link: card 002 depends on 001
+  (let [r (kb dir "link" "002" "001")]
+    (T "deps: link exits 0" (:ok r) "link failed")
+    (T "deps: link output" (str/includes? (txt r) "depends on 001") "link message wrong"))
+
+  ;; Duplicate link should fail
+  (let [r (kb dir "link" "002" "001")]
+    (T "deps: duplicate link fails" (not (:ok r)) "duplicate link should fail"))
+
+  ;; Self-link should fail
+  (let [r (kb dir "link" "001" "001")]
+    (T "deps: self-link fails" (not (:ok r)) "self-link should fail"))
+
+  ;; Show should display depends-on
+  (let [s (kb dir "show" "002")]
+    (T "deps: show has depends-on" (str/includes? (txt s) "Depends on: 001") "depends-on missing in show"))
+
+  ;; Deps command
+  (let [r (kb dir "deps" "002")]
+    (T "deps: deps exits 0" (:ok r) "deps failed")
+    (T "deps: shows dependency" (str/includes? (txt r) "001") "dep not shown")
+    (T "deps: shows unsatisfied" (str/includes? (txt r) "unsatisfied") "dep should be unsatisfied"))
+
+  ;; Deps command on card 001 should show it blocks 002
+  (let [r (kb dir "deps" "001")]
+    (T "deps: card 001 has no deps" (str/includes? (txt r) "none") "001 should have no deps")
+    (T "deps: card 001 blocks 002" (str/includes? (txt r) "blocks") "001 should block 002"))
+
+  ;; Pull should skip card 002 (unsatisfied dep), claim 001
+  (let [r (kb dir "pull" "--agent" "test-dep-agent")]
+    (T "deps: pull skips 002" (:ok r) "pull failed")
+    (T "deps: pull claims 001 not 002" (str/includes? (txt r) "001") "should claim 001, not 002"))
+
+  ;; Move 001 to done, now 002's dep is satisfied
+  (kb dir "move" "001" "in-progress")
+  (kb dir "move" "001" "review")
+  (kb dir "move" "001" "done")
+
+  ;; Now pull should claim 002
+  (let [r (kb dir "pull" "--agent" "test-dep-agent2")]
+    (T "deps: pull claims 002 after dep done" (:ok r) "pull failed after dep done")
+    (T "deps: pull claims 002" (str/includes? (txt r) "002") "should claim 002"))
+
+  ;; Unlink test
+  (kb dir "add" "Card C")
+  (kb dir "link" "003" "002")
+  (let [r (kb dir "unlink" "003" "002")]
+    (T "deps: unlink exits 0" (:ok r) "unlink failed")
+    (T "deps: unlink output" (str/includes? (txt r) "no longer depends on") "unlink message wrong"))
+
+  ;; Unlink non-existent dep should fail
+  (let [r (kb dir "unlink" "003" "002")]
+    (T "deps: unlink non-dep fails" (not (:ok r)) "unlink non-dep should fail"))
+
+  ;; Context should show dependencies
+  (let [r (kb dir "context" "002")]
+    (T "deps: context shows dependencies" (str/includes? (txt r) "Dependencies") "no dependencies in context"))
+
+  (println "\n== Deps cleanup ==")
+  (cleanup dir))
+
+;; ── Agent confidence test ──────────────────────────────────────────
+
+(let [dir (make-repo)]
+  (println "\n== Agent confidence ==")
+  (let [r (kb dir "init")]
+    (T "conf: init exits 0" (:ok r) "init failed"))
+
+  ;; Configure review lane with min_confidence
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\n"
+                          "lanes:\n- name: backlog\n- name: in-progress\n  max_wip: 5\n"
+                          "- name: review\n  min_confidence: 80\n  max_wip: 3\n"
+                          "- name: done\n  on_enter: merge\n")))
+
+  ;; Add a card and move to in-progress
+  (kb dir "add" "Confidence test card")
+  (kb dir "move" "001" "in-progress")
+
+  ;; Move to review with low confidence — should auto-block
+  (let [r (kb dir "move" "001" "review" "--confidence" "50")]
+    (T "conf: low confidence move fails" (not (:ok r)) "low confidence move should fail")
+    (T "conf: blocked message" (str/includes? (str (:out r "") (:err r "")) "Blocked") "should say blocked"))
+
+  ;; Verify card is blocked
+  (let [s (kb dir "show" "001")]
+    (T "conf: card is blocked" (str/includes? (txt s) "Blocked:  true") "card not blocked"))
+
+  ;; Unblock it manually
+  (kb dir "unblock" "001")
+
+  ;; Move with high confidence — should succeed
+  (let [r (kb dir "move" "001" "review" "--confidence" "90")]
+    (T "conf: high confidence move exits 0" (:ok r) "high confidence move failed")
+    (T "conf: moved to review" (str/includes? (txt r) "review") "not in review"))
+
+  ;; Move without confidence flag — should succeed (no check)
+  (kb dir "move" "001" "done")
+  (let [s (kb dir "show" "001")]
+    (T "conf: in done lane" (str/includes? (txt s) "Lane:     done") "not in done"))
+
+  (println "\n== Confidence cleanup ==")
   (cleanup dir))
 
 ;; ── Summary ────────────────────────────────────────────────────

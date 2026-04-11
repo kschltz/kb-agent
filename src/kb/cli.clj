@@ -121,7 +121,10 @@
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         _ (when (str/blank? lane) (fail! "lane is required"))
         board (b/make-board)
-        [success? message gate-results] (b/move! board card-id lane :agent (:agent opts ""))]
+        confidence (:confidence opts)
+        [success? message gate-results] (b/move! board card-id lane
+                                                   :agent (:agent opts "")
+                                                   :confidence confidence)]
     (if (:json opts)
       (out-json {:success success?
                  :message message
@@ -171,10 +174,17 @@
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)]
     (try
-      (let [card (b/approve! board card-id :agent (or (:agent opts) "human"))]
-        (if (:json opts)
-          (out-json card)
-          (println (str "Approved card " (:id card)))))
+      (if (:reject opts)
+        (let [card (b/reject-approval! board card-id
+                                       :reason (or (:reason opts) "")
+                                       :agent (or (:agent opts) "human"))]
+          (if (:json opts)
+            (out-json card)
+            (println (str "Rejected approval for card " (:id card) " \u2192 " (:lane card)))))
+        (let [card (b/approve! board card-id :agent (or (:agent opts) "human"))]
+          (if (:json opts)
+            (out-json card)
+            (println (str "Approved card " (:id card))))))
       (catch Exception e
         (fail! (.getMessage e))))))
 
@@ -270,6 +280,8 @@
           (println (str "  Question: " (:pending-question card))))
         (when (:last-heartbeat card)
           (println (str "  Heartbeat: " (u/fmt-ts (:last-heartbeat card)))))
+        (when (seq (:depends-on card))
+          (println (str "  Depends on: " (str/join ", " (:depends-on card)))))
 
         (when (not (str/blank? desc))
           (println)
@@ -345,13 +357,83 @@
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)]
+    ;; Handle --compact: permanently compress older history
+    (when (:compact opts)
+      (let [result (b/compact-history! board card-id :keep (or (:keep opts) 10))]
+        (when-not (:json opts)
+          (println (:message result)))))
     (try
-      (let [context (b/get-context board card-id)]
+      (let [since-ep (when-let [s (:since opts)] (u/parse-since s))
+            context-opts (cond-> {}
+                           since-ep         (assoc :since since-ep)
+                           (:strategy opts) (assoc :strategy (keyword (:strategy opts)))
+                           (:budget opts)   (assoc :budget (int (:budget opts)))
+                           (:gates-only opts) (assoc :gates-only true)
+                           (:deps-only opts)  (assoc :deps-only true))
+            context (b/get-context board card-id context-opts)]
         (if (:json opts)
           (out-json {:context context})
           (println context)))
       (catch Exception e
         (fail! (.getMessage e))))))
+
+(defn cmd-link
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        dep-id  (let [d (:dep-id opts)] (if (integer? d) (format "%03d" d) (str d)))
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        _ (when (str/blank? dep-id) (fail! "dep-id is required"))
+        board (b/make-board)]
+    (try
+      (let [updated (b/link! board card-id dep-id)]
+        (if (:json opts)
+          (out-json {:card updated})
+          (println (str "Card " card-id " now depends on " dep-id))))
+      (catch Exception e
+        (fail! (.getMessage e))))))
+
+(defn cmd-unlink
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        dep-id  (let [d (:dep-id opts)] (if (integer? d) (format "%03d" d) (str d)))
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        _ (when (str/blank? dep-id) (fail! "dep-id is required"))
+        board (b/make-board)]
+    (try
+      (let [updated (b/unlink! board card-id dep-id)]
+        (if (:json opts)
+          (out-json {:card updated})
+          (println (str "Card " card-id " no longer depends on " dep-id))))
+      (catch Exception e
+        (fail! (.getMessage e))))))
+
+(defn cmd-deps
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)
+        card  (b/load-card board card-id)
+        deps  (:depends-on card)
+        usdeps (b/unsatisfied-deps board card)
+        blocking (b/card-blocks board card-id)]
+    (if (:json opts)
+      (out-json {:depends-on deps
+                 :unsatisfied usdeps
+                 :blocks (mapv :id blocking)})
+      (do
+        (println (str "Card " card-id " dependencies:"))
+        (if (empty? deps)
+          (println "  (none)")
+          (doseq [dep-id deps]
+            (let [dep-card (b/load-card board dep-id)]
+              (println (str "  - " dep-id ": " (:title dep-card)
+                            " [" (:lane dep-card) "]"
+                            (when (some #{dep-id} usdeps) " (unsatisfied)"))))))
+        (when (seq blocking)
+          (println)
+          (println "This card blocks:")
+          (doseq [c blocking]
+            (println (str "  - [" (:id c) "] " (:title c)))))))))
 
 (defn cmd-spawn
   [{:keys [opts]}]
@@ -503,7 +585,9 @@
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)
-        [success? message gate-results] (b/advance! board card-id :agent (:agent opts ""))]
+        [success? message gate-results] (b/advance! board card-id
+                                                      :agent (:agent opts "")
+                                                      :confidence (:confidence opts))]
     (if (:json opts)
       (out-json {:success success? :message message :gate_results gate-results})
       (if success?
@@ -560,6 +644,27 @@
       (catch Exception e
         (fail! (.getMessage e))))))
 
+(defn cmd-watch
+  "Watch the board for stale heartbeats and expired approvals.
+   Runs a polling loop at the configured interval (default 60s)."
+  [{:keys [opts]}]
+  (let [interval (or (:interval opts) 60)]
+    (println (str "Watching board (interval: " interval "s). Press Ctrl+C to stop."))
+    (loop []
+      (let [board (b/make-board)]
+        ;; Check stale heartbeats
+        (let [stale (b/check-stale-heartbeats! board)]
+          (when (seq stale)
+            (doseq [card stale]
+              (println (str "  [" (:id card) "] Heartbeat timeout: " (:title card))))))
+        ;; Check approval timeouts
+        (let [expired (b/check-approval-timeouts! board)]
+          (when (seq expired)
+            (doseq [card expired]
+              (println (str "  [" (:id card) "] Approval timeout: " (:title card)))))))
+      (Thread/sleep (* interval 1000))
+      (recur))))
+
 (defn cmd-help
   [_]
   (println "Usage: kb <command> [options]")
@@ -584,6 +689,7 @@
   (println "  gates    <card-id> [opts]               Show gates for the next lane transition")
   (println "  edit     <card-id> [opts]               Edit card title, priority, description, or tags")
   (println "  heartbeat <card-id> [opts]              Record an agent heartbeat")
+  (println "  watch    [--interval 60]                Watch for stale heartbeats and expired approvals")
   (println "  status   [opts]                         Show board status")
   (println "  context  <card-id> [opts]               Output card context for agent prompt")
   (println "  spawn    <card-id>                      Spawn a sub-agent for a card")
@@ -598,8 +704,16 @@
   [{:cmds ["init"] :fn cmd-init :args->opts [:path]}
    {:cmds ["add"] :fn cmd-add :args->opts [:title]}
    {:cmds ["pull"] :fn cmd-pull}
-   {:cmds ["move"] :fn cmd-move :args->opts [:card-id :lane]}
-   {:cmds ["advance"] :fn cmd-advance :args->opts [:card-id]}
+   {:cmds ["move"] :fn cmd-move :args->opts [:card-id :lane]
+    :opts {:confidence {:desc "Agent confidence level (0-100) for the move"
+                        :type :number}
+           :agent {:desc "Agent ID performing the move"
+                   :type :string}}}
+   {:cmds ["advance"] :fn cmd-advance :args->opts [:card-id]
+    :opts {:confidence {:desc "Agent confidence level (0-100) for the advance"
+                        :type :number}
+           :agent {:desc "Agent ID performing the advance"
+                   :type :string}}}
    {:cmds ["done"] :fn cmd-done :args->opts [:card-id]}
    {:cmds ["reject"] :fn cmd-reject :args->opts [:card-id]}
    {:cmds ["block"] :fn cmd-block :args->opts [:card-id]}
@@ -614,10 +728,28 @@
    {:cmds ["gates"] :fn cmd-gates :args->opts [:card-id]}
    {:cmds ["edit"] :fn cmd-edit :args->opts [:card-id]}
    {:cmds ["heartbeat"] :fn cmd-heartbeat :args->opts [:card-id]}
+   {:cmds ["watch"] :fn cmd-watch}
    {:cmds ["status"] :fn cmd-status}
-   {:cmds ["context"] :fn cmd-context :args->opts [:card-id]}
+   {:cmds ["context"] :fn cmd-context :args->opts [:card-id]
+    :opts {:compact {:desc "Permanently compress older history entries"
+                     :type :bool}
+           :keep {:desc "Number of recent entries to keep when compacting (default: 10)"
+                  :type :number}
+           :since {:desc "Only include history after this time (e.g. 2h, 30m, 1d)"
+                   :type :string}
+           :strategy {:desc "Context strategy: full, recent, or summary"
+                      :type :string}
+           :budget {:desc "Max character count for context output"
+                    :type :number}
+           :gates-only {:desc "Only show gates information for the card"
+                        :type :bool}
+           :deps-only {:desc "Only show dependency information for the card"
+                       :type :bool}}}
    {:cmds ["spawn"] :fn cmd-spawn :args->opts [:card-id]}
    {:cmds ["cleanup"] :fn cmd-cleanup :args->opts [:card-id]}
+   {:cmds ["link"] :fn cmd-link :args->opts [:card-id :dep-id]}
+   {:cmds ["unlink"] :fn cmd-unlink :args->opts [:card-id :dep-id]}
+   {:cmds ["deps"] :fn cmd-deps :args->opts [:card-id]}
    {:cmds ["serve"] :fn cmd-serve}
    {:cmds ["recover"] :fn cmd-recover}
    {:cmds [] :fn cmd-help}])

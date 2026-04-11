@@ -315,7 +315,128 @@ When a human adds a note via the web UI, how does the running sub-agent see it?
 Leaning toward poll-based. The agent's system prompt includes instructions to check for new human notes before each major step.
 
 
-## 6. Non-goals (v1)
+## 6. Agent-Human Interaction Improvements (v2)
+
+Based on 2026 agent trends: long-running autonomous agents, context engineering, multi-agent coordination, and risk-tiered approval patterns.
+
+### 6.1 Notification hooks
+
+Agents run for hours autonomously. Without notifications, blocks and questions go unnoticed.
+
+```yaml
+notifications:
+  hooks:
+    - event: blocked
+      command: "curl -s -X POST $SLACK_WEBHOOK -d '{card_id}: {reason}'"
+    - event: gate_fail
+      command: "curl -s -X POST $SLACK_WEBHOOK -d 'Gate {gate} failed on {card_id}'"
+    - event: ask
+      command: "curl -s -X POST $SLACK_WEBHOOK -d '{card_id} asks: {question}'"
+    - event: approval_required
+      command: "curl -s -X POST $SLACK_WEBHOOK -d '{card_id} needs approval'"
+    - event: completed
+      command: "curl -s -X POST $SLACK_WEBHOOK -d '{card_id} completed!'"
+    - event: heartbeat_missed
+      command: "curl -s -X POST $SLACK_WEBHOOK -d '{card_id} agent may be stuck'"
+```
+
+Events: blocked, unblocked, gate_fail, gate_pass, ask, answer, approval_required, approved, completed, heartbeat_missed.
+
+Template variables: `{card_id}`, `{card_title}`, `{lane}`, `{reason}`, `{gate}`, `{agent}`, `{question}`, `{answer}`.
+
+Hook commands run on best-effort basis. Failures are logged but don't block the operation.
+
+### 6.2 Stuck agent detection
+
+`kb heartbeat` records liveness but nothing checks it. Add heartbeat monitoring:
+
+```yaml
+lanes:
+- name: in-progress
+  max_wip: 5
+  heartbeat_timeout: 30m   # block card if no heartbeat for 30 minutes
+```
+
+New command: `kb watch [--interval 60]` — polls all cards in lanes with `heartbeat_timeout` and auto-blocks stale ones. Runs alongside `kb serve`.
+
+### 6.3 Approval tiers and timeouts
+
+Current approval is binary with no expiry. Add:
+
+```yaml
+lanes:
+- name: done
+  requires_approval: true
+  approval_timeout: 4h
+  approval_timeout_action: reject  # reject | escalate | notify
+```
+
+New command: `kb approve <card> --reject --reason "..."` (explicit reject for pending-approval cards). Timeout actions: reject (move back), escalate (notify + extend), notify (alert only).
+
+### 6.4 Context compaction
+
+`kb context` dumps entire history. For long-running cards, this saturates the context window. Add:
+
+```yaml
+context_strategy: recent    # recent | summary | full
+context_budget: 4000         # target character budget
+```
+
+- `recent`: Last N entries capped by budget (default)
+- `summary`: Compress older entries into a paragraph, keep recent verbatim
+- `full`: Current behavior
+
+New flag: `kb context <card> --compact` — permanently replaces older history entries with a `compacted` summary entry.
+
+### 6.5 Card dependencies
+
+Agents working on related cards need to express dependencies:
+
+```bash
+kb link 002 001   # 002 depends on 001
+kb unlink 002 001
+kb deps 001       # show dependency graph
+```
+
+Card meta field: `depends_on: [001]`. Reverse lookup: `kb deps 001` shows which cards this one blocks.
+
+Dependency rules: `depends_on` cards must be in the final lane (done) for the dependent card to be available via `kb pull`.
+
+`kb pull` skips cards with unmet dependencies.
+
+### 6.6 Agent confidence signals
+
+Agents can signal confidence on lane transitions:
+
+```bash
+kb move 001 review --confidence 90
+kb move 002 review --confidence 40  # below threshold → auto-block
+```
+
+Lane config:
+```yaml
+lanes:
+- name: review
+  min_confidence: 70    # below this, auto-block for human review (0-100 scale)
+```
+
+Confidence is advisory by default — only blocks when `min_confidence` is configured.
+
+### 6.7 Progressive context disclosure
+
+Agents poll for updates efficiently instead of re-reading entire history:
+
+```bash
+kb context 001 --since 1712345678    # only entries after timestamp
+kb context 001 --summary             # condensed overview, no full history
+kb context 001 --gates-only          # just gate status for next transition
+kb context 001 --deps                 # just dependency info
+```
+
+Flags can be combined: `kb context 001 --summary --gates-only`.
+
+
+## 7. Non-goals (v1)
 
 - No built-in CI/CD integration (gates handle this via shell commands)
 - No multi-board / multi-project support
@@ -326,9 +447,9 @@ Leaning toward poll-based. The agent's system prompt includes instructions to ch
 - No MCP server (future: could wrap CLI as MCP for richer integration)
 
 
-## 7. Implementation Plan
+## 8. Implementation Plan
 
-### Phase 1: Core CLI + git integration
+### Phase 1: Core CLI + git integration (done)
 
 - Board model: filesystem read/write with atomic operations
 - Git operations: branch creation, worktree management, merge/squash/rebase
@@ -337,28 +458,40 @@ Leaning toward poll-based. The agent's system prompt includes instructions to ch
 - `--json` output for all commands
 - Unit tests
 
-### Phase 2: Web UI
+### Phase 2: Web UI (done)
 
 - Babashka HTTP + WebSocket server (with file watcher for live state)
 - Self-contained HTML/JS SPA (no Node required to serve)
 - React + shadcn dev UI (Vite build, for iteration)
-- Board view with drag-and-drop (@dnd-kit)
+- Board view with drag-and-drop
 - Card detail sheet with conversation timeline and diff viewer
 - Live updates via filesystem watcher + WebSocket
 - Block/unblock/note interventions from UI
 
-### Phase 3: Sub-agent orchestration
+### Phase 3: Sub-agent orchestration (done)
 
 - `kb context` command for system prompt generation
 - `kb spawn` with configurable agent command template
 - Conversation capture into structured history.jsonl
 - Example CLAUDE.md / agent configurations
-- Documentation and examples
 
-### Phase 4: Polish + distribution
+### Phase 4: Polish + distribution (done)
 
 - `kb recover` for orphaned worktrees
 - Merge conflict detection and handling
 - `kb log --since` for incremental history reads
-- pip package with bundled web UI assets
-- README, usage guide, example projects
+- `kb done` empty branch merge fix
+
+### Phase 5: Agent-human interaction improvements (done)
+
+- Notification hooks (card 001)
+- Stuck agent detection / heartbeat monitoring (card 002)
+- Approval tiers and timeouts (card 003)
+- Context compaction (card 004)
+- Card dependencies (card 005)
+- Agent confidence signals (card 006)
+- Progressive context disclosure (card 007)
+- Web UI improvements: font size control, full-width lanes (card 008)
+- Card summaries on board (card 009)
+- Diff visualization with bar chart (card 010)
+- kb done fails with empty branch — fix (card 011)

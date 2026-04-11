@@ -8,7 +8,7 @@
   (:import [java.nio.file Path]))
 
 ;; Forward declaration (move! defined after pull!)
-(declare move!)
+(declare move! deps-satisfied?)
 
 ;; ── Key translation helpers ───────────────────────────────────
 ;;
@@ -40,13 +40,14 @@
   [id title lane & {:keys [priority blocked blocked-reason assigned-agent
                            branch worktree created-at updated-at tags
                            pending-approval approved-by
-                           pending-question last-heartbeat]
+                           pending-question last-heartbeat
+                           depends-on]
                     :or {priority 0 blocked false blocked-reason ""
                          assigned-agent "" branch "" worktree ""
                          pending-approval false approved-by ""
                          pending-question nil
                          last-heartbeat nil
-                         tags []}}]
+                         tags [] depends-on []}}]
   (let [now (u/now-epoch)]
     {:id               id
      :title            title
@@ -63,7 +64,8 @@
      :pending-approval pending-approval
      :approved-by      approved-by
      :pending-question (or pending-question "")
-     :last-heartbeat   last-heartbeat}))
+     :last-heartbeat   last-heartbeat
+     :depends-on       depends-on}))
 
 (defn- card-from-yaml
   "Convert a YAML map (with snake_case keys as keywords or strings) to a card map."
@@ -84,7 +86,8 @@
      :pending-approval (boolean (:pending-approval d))
      :approved-by      (str (:approved-by d ""))
      :pending-question (or (:pending-question d) "")
-     :last-heartbeat   (when (:last-heartbeat d) (double (:last-heartbeat d)))}))
+     :last-heartbeat   (when (:last-heartbeat d) (double (:last-heartbeat d)))
+     :depends-on       (vec (or (:depends-on d) []))}))
 
 (defn- card->yaml-map
   "Convert a card map to snake_case keys for YAML serialization."
@@ -105,7 +108,8 @@
            "approved_by"      (:approved-by card)}]
     (cond-> m
       (:pending-question card) (assoc "pending_question" (:pending-question card))
-      (:last-heartbeat card)   (assoc "last_heartbeat"   (:last-heartbeat card)))))
+      (:last-heartbeat card)   (assoc "last_heartbeat"   (:last-heartbeat card))
+      (seq (:depends-on card)) (assoc "depends_on"        (vec (:depends-on card))))))
 
 ;; ── HistoryEntry shape ────────────────────────────────────────
 ;;
@@ -152,6 +156,59 @@
    :passed    passed
    :output    output
    :timestamp (u/now-epoch)})
+
+;; ── Notification hooks ──────────────────────────────────────────
+
+(defn notification-hooks
+  "Return the list of notification hook maps from board config.
+   Each hook has :event and :command keys."
+  [board]
+  (get (:config board) "notifications" {}))
+
+(defn- template-vars
+  "Build a map of template variables for hook command substitution.
+   Uses {var} syntax, e.g. {card_id}, {card_title}."
+  [event-type card & {:keys [reason gate question answer agent]}]
+  (let [m {"{card_id}"     (or (:id card) "")
+           "{card_title}"  (or (:title card) "")
+           "{lane}"        (or (:lane card) "")
+           "{reason}"      (or reason "")
+           "{gate}"        (or gate "")
+           "{question}"    (or question "")
+           "{answer}"      (or answer "")
+           "{agent}"       (or agent "")}]
+    m))
+
+(defn- run-hook-command
+  "Run a single notification hook command. Substitutes template variables.
+   Returns nil on success, logs warning on failure but never throws."
+  [hook-command template-map]
+  (let [cmd (reduce (fn [c [var val]]
+                      (str/replace c (str var) (str val)))
+                    hook-command
+                    template-map)]
+    (try
+      (proc/shell {:out :string :err :string :continue true} "sh" "-c" cmd)
+      nil
+      (catch Exception e
+        (binding [*out* *err*]
+          (println (str "Warning: notification hook failed: " (.getMessage e))))))))
+
+(defn run-hooks!
+  "Run all notification hooks matching event-type for the board.
+   Template vars are substituted from the card and optional extra data.
+   Hooks run on best-effort basis — failures are logged but don't block operations."
+  [board event-type card & {:keys [reason gate question answer agent]}]
+  (let [hooks-config (notification-hooks board)
+        hooks (get hooks-config "hooks" [])]
+    (doseq [hook hooks]
+      (when (= (get hook "event") event-type)
+        (let [cmd    (get hook "command")
+              tvars  (template-vars event-type card
+                                    :reason reason :gate gate
+                                    :question question :answer answer
+                                    :agent agent)]
+          (run-hook-command cmd tvars))))))
 
 ;; ── Board constructor ─────────────────────────────────────────
 
@@ -428,9 +485,13 @@
           (when (not= 0 (:exit r))
             (git-safe :args ["checkout" "-"] :cwd proj)
             (throw (ex-info (str "Merge conflict: " (:err r)) {}))))
-        (let [r (git-safe :args ["commit" "-m" (str "kb: " (:title card) " (#" (:id card) ")")] :cwd proj)]
-          (when (not= 0 (:exit r))
-            (throw (ex-info (str "Failed to commit merge: " (:err r)) {})))))
+        (let [commit-r (git-safe :args ["commit" "-m" (str "kb: " (:title card) " (#" (:id card) ")")] :cwd proj)]
+          ;; If commit fails, it may mean there's nothing to commit (branch has no changes vs base)
+          ;; Check if there are staged changes — if not, the merge is a no-op, which is fine
+          (when (not= 0 (:exit commit-r))
+            (let [diff-r (git-safe :args ["diff" "--cached" "--quiet"] :cwd proj)]
+              (when (not= 0 (:exit diff-r))
+                (throw (ex-info (str "Failed to commit merge: " (:err commit-r)) {})))))))
 
       (= strategy "merge")
       (do
@@ -503,12 +564,14 @@
       (append-history! board card-id
                        (make-history-entry "system" "created"
                                            :content (str "Card created in lane '" lane-n "'")))
+      (run-hooks! board "created" card)
       card)))
 
 (defn- find-available-card
   "Find the first unblocked, unassigned card across all lanes,
    preferring lanes earlier in the workflow (lower index).
-   Cards in the final lane (done) are excluded."
+   Cards in the final lane (done) are excluded.
+   Cards with unsatisfied dependencies are excluded."
   [board]
   (let [final-lane (last (lane-names board))
         all        (all-cards board)]
@@ -516,7 +579,8 @@
                           :priority :created-at)
                     (filter #(and (not= (:lane %) final-lane)
                                   (not (:blocked %))
-                                  (str/blank? (:assigned-agent %)))
+                                  (str/blank? (:assigned-agent %))
+                                  (deps-satisfied? board %))
                             all)))))
 
 (defn pull!
@@ -549,7 +613,68 @@
                                                            ". Branch: " branch
                                                            ". Worktree: " wt-path)
                                              :agent-id agent-id))
+        (run-hooks! board "pulled" updated :agent agent-id)
         updated))))
+
+;; ── Card dependencies ────────────────────────────────────────────
+
+(defn link!
+  "Add a dependency: card-id depends on dep-id (card-id will not be available
+   until dep-id is in the final lane). Returns the updated card."
+  [board card-id dep-id]
+  (let [card (load-card board card-id)
+        _ (when (= card-id dep-id)
+            (throw (ex-info "A card cannot depend on itself." {})))
+        existing (:depends-on card)]
+    (when (some #{dep-id} existing)
+      (throw (ex-info (str "Card " card-id " already depends on " dep-id) {})))
+    (let [updated (assoc card :depends-on (conj existing dep-id))]
+      (save-card! board updated)
+      (append-history! board card-id
+                       (make-history-entry "system" "linked"
+                                           :content (str "Added dependency on card " dep-id)))
+      updated)))
+
+(defn unlink!
+  "Remove a dependency: card-id no longer depends on dep-id.
+   Returns the updated card."
+  [board card-id dep-id]
+  (let [card (load-card board card-id)
+        existing (:depends-on card)]
+    (when-not (some #{dep-id} existing)
+      (throw (ex-info (str "Card " card-id " does not depend on " dep-id) {})))
+    (let [updated (assoc card :depends-on (vec (remove #{dep-id} existing)))]
+      (save-card! board updated)
+      (append-history! board card-id
+                       (make-history-entry "system" "unlinked"
+                                           :content (str "Removed dependency on card " dep-id)))
+      updated)))
+
+(defn card-blocks
+  "Return list of card IDs that depend on the given card (i.e. cards this one blocks)."
+  [board card-id]
+  (let [all (all-cards board)]
+    (filterv (fn [c] (some #{card-id} (:depends-on c))) all)))
+
+(defn deps-satisfied?
+  "Check if all dependencies for a card are satisfied (each dep is in the final lane)."
+  [board card]
+  (let [final-lane (last (lane-names board))
+        deps      (:depends-on card)]
+    (if (empty? deps)
+      true
+      (let [dep-cards (mapv #(load-card board %) deps)]
+        (every? #(= final-lane (:lane %)) dep-cards)))))
+
+(defn unsatisfied-deps
+  "Return list of dependency card IDs that are not yet in the final lane."
+  [board card]
+  (let [final-lane (last (lane-names board))
+        deps      (:depends-on card)]
+    (if (empty? deps)
+      []
+      (let [dep-cards (mapv #(load-card board %) deps)]
+        (mapv :id (filterv #(not= final-lane (:lane %)) dep-cards))))))
 
 ;; ── Gate execution ────────────────────────────────────────────
 
@@ -583,8 +708,9 @@
 
 (defn move!
   "Move card to target-lane. Runs quality gates.
-   Returns [success? message gate-results]."
-  [board card-id target-lane & {:keys [agent] :or {agent ""}}]
+   Returns [success? message gate-results].
+   Opts: :agent, :confidence (0-100)"
+  [board card-id target-lane & {:keys [agent confidence] :or {agent "" confidence nil}}]
   (if-not (some #{target-lane} (lane-names board))
     [false (str "Lane '" target-lane "' not found.") []]
     (let [card        (load-card board card-id)
@@ -601,8 +727,25 @@
 
         :else
         (let [target-config (lane-by-name board target-lane)
-              max-wip       (get target-config "max_wip")
-              current-wip   (count (cards-in-lane board target-lane))]
+              min-conf      (get target-config "min_confidence")
+              ;; Check confidence threshold
+              low-confidence? (and min-conf confidence (< confidence min-conf))]
+          (if low-confidence?
+            ;; Auto-block the card instead of moving
+            (do
+              (let [reason (str "Low confidence (" confidence "% < " min-conf "% min for '" target-lane "')")
+                    card2  (assoc card :blocked true :blocked-reason reason)]
+                (save-card! board card2))
+              (append-history! board card-id
+                               (make-history-entry "system" "blocked"
+                                                   :content (str "Auto-blocked: confidence " confidence "% below minimum " min-conf "%")
+                                                   :agent-id agent))
+              (run-hooks! board "blocked" (load-card board card-id)
+                          :reason (str "confidence " confidence "% below min " min-conf "%")
+                          :agent agent)
+              [false (str "Blocked: confidence " confidence "% is below the minimum " min-conf "% for lane '" target-lane "'.") []])
+          (let [max-wip       (get target-config "max_wip")
+                current-wip   (count (cards-in-lane board target-lane))]
           (if (and max-wip (>= current-wip max-wip))
             [false (str "Lane '" target-lane "' is at WIP limit (" max-wip ").") []]
             (let [gate-key (str "gate_from_" source-lane)
@@ -619,6 +762,7 @@
                                                                        :content (str "Gate failed: " (:output gr))
                                                                        :agent-id agent
                                                                        :gate gate-cmd))
+                                  (run-hooks! board "gate_fail" card :gate gate-cmd :agent agent)
                                   (reduced (conj acc gr))))))
                           []
                           gates)]
@@ -644,10 +788,13 @@
                                        (make-history-entry "system" "gate_pass"
                                                            :content "Gate passed"
                                                            :gate (:gate gr))))
+                    (doseq [gr gate-results]
+                      (run-hooks! board "gate_pass" card :gate (:gate gr) :agent agent))
                     (append-history! board card-id
                                      (make-history-entry "system" "approval_required"
                                                          :content (str "Awaiting approval to complete move to '" target-lane "'")
                                                          :agent-id agent))
+                    (run-hooks! board "approval_required" (load-card board card-id) :agent agent)
                     [true (str "Moved to '" target-lane "' — awaiting approval. Run `kb approve " card-id "` to approve.") gate-results])
                   ;; No approval needed — handle on_enter: merge
                   (let [on-enter (get target-config "on_enter")]
@@ -671,6 +818,9 @@
                                            (make-history-entry "system" "gate_pass"
                                                                :content "Gate passed"
                                                                :gate (:gate gr))))
+                        (doseq [gr gate-results]
+                          (run-hooks! board "gate_pass" card :gate (:gate gr) :agent agent))
+                        (run-hooks! board "completed" card2 :agent agent)
                         [true (str "Moved to '" target-lane "'.") gate-results])
                       (catch Exception e
                         (append-history! board card-id
@@ -690,7 +840,12 @@
                                          (make-history-entry "system" "gate_pass"
                                                              :content "Gate passed"
                                                              :gate (:gate gr))))
-                      [true (str "Moved to '" target-lane "'.") gate-results]))))))))))))
+                      (doseq [gr gate-results]
+                        (run-hooks! board "gate_pass" card :gate (:gate gr) :agent agent))
+                      (let [final-lane (last (lane-names board))]
+                        (when (= target-lane final-lane)
+                          (run-hooks! board "completed" (load-card board card-id) :agent agent)))
+                      [true (str "Moved to '" target-lane "'.") gate-results]))))))))))))))
 
 (defn reject!
   "Move card back to previous lane."
@@ -706,6 +861,7 @@
                      (make-history-entry "system" "rejected"
                                          :content (str "Rejected to '" prev-lane "': " reason)
                                          :agent-id agent))
+    (run-hooks! board "rejected" updated :reason reason :agent agent)
     updated))
 
 (defn approve!
@@ -721,6 +877,33 @@
                        (make-history-entry "system" "approved"
                                            :content (str "Approved by " approver)
                                            :agent-id approver))
+      (run-hooks! board "approved" updated :agent approver)
+      updated)))
+
+(defn reject-approval!
+  "Reject a card that is pending approval. Moves it back to the previous lane
+   and clears the pending flag. Optionally records an approval timeout action."
+  [board card-id & {:keys [reason agent timeout-action] :or {reason "" agent "" timeout-action nil}}]
+  (let [card  (load-card board card-id)]
+    (when-not (:pending-approval card)
+      (throw (ex-info (str "Card " card-id " is not pending approval.") {})))
+    (let [names     (lane-names board)
+          idx       (.indexOf names (:lane card))
+          prev-lane (nth names (max 0 (dec idx)))
+          reject-reason (if (str/blank? reason)
+                          (if timeout-action
+                            (str "Approval timed out (" timeout-action ")")
+                            "Approval rejected")
+                          reason)
+          updated (assoc card :pending-approval false :approved-by ""
+                              :lane prev-lane :assigned-agent ""
+                              :blocked false :blocked-reason "")]
+      (save-card! board updated)
+      (append-history! board card-id
+                       (make-history-entry "system" "approval_rejected"
+                                           :content (str "Approval rejected: " reject-reason)
+                                           :agent-id agent))
+      (run-hooks! board "approval_rejected" updated :reason reject-reason :agent agent)
       updated)))
 
 (defn block!
@@ -731,6 +914,7 @@
     (save-card! board updated)
     (append-history! board card-id
                      (make-history-entry "system" "blocked" :content reason))
+    (run-hooks! board "blocked" updated :reason reason)
     updated))
 
 (defn unblock!
@@ -741,6 +925,7 @@
     (save-card! board updated)
     (append-history! board card-id
                      (make-history-entry "system" "unblocked" :content ""))
+    (run-hooks! board "unblocked" updated)
     updated))
 
 (defn add-note!
@@ -932,6 +1117,7 @@
                                          "ask"
                                          :content question
                                          :agent-id (if (str/blank? agent) "" agent)))
+    (run-hooks! board "ask" updated :question question :agent agent)
     updated))
 
 (defn answer!
@@ -949,6 +1135,7 @@
                        (make-history-entry "human" "answer"
                                            :content answer
                                            :agent-id agent))
+      (run-hooks! board "answer" updated :answer answer :agent agent)
       updated)))
 
 ;; ── Heartbeat ──────────────────────────────────────────────────
@@ -966,18 +1153,90 @@
                                          :agent-id agent))
     updated))
 
+;; ── Watcher checks ─────────────────────────────────────────────
+
+(defn- parse-duration
+  "Parse a duration string like '30s', '30m', '4h', '1d' to seconds.
+   Returns nil if unparseable."
+  [s]
+  (when (string? s)
+    (let [match (re-matches #"(\d+)([smhd])" s)]
+      (when match
+        (let [n (Integer/parseInt (match 1))
+              unit (match 2)]
+          (cond
+            (= unit "s") n
+            (= unit "m") (* n 60)
+            (= unit "h") (* n 3600)
+            (= unit "d") (* n 86400)
+            :else nil))))))
+
+(defn check-approval-timeouts!
+  "Check all pending-approval cards for expired approval timeouts.
+   For each expired card, applies the configured timeout_action.
+   Returns list of cards that were acted on."
+  [board]
+  (let [now   (u/now-epoch)
+        all   (all-cards board)]
+    (->> all
+         (filter :pending-approval)
+         (keep (fn [card]
+                 (let [lane-conf  (lane-by-name board (:lane card))
+                       timeout    (get lane-conf "approval_timeout")
+                       action     (get lane-conf "approval_timeout_action" "reject")
+                       timeout-s  (parse-duration timeout)]
+                   (when (and timeout-s
+                              ;; Card must have been in pending-approval for at least timeout-s
+                              ;; We check against updated-at as a proxy for when it entered this state
+                              (> (- now (:updated-at card)) timeout-s))
+                     (try
+                       (reject-approval! board (:id card)
+                                         :reason (str "Approval timeout (" timeout ")")
+                                         :timeout-action action)
+                       (run-hooks! board "approval_timeout" card :reason (str "Approval timeout (" timeout ")"))
+                       card
+                       (catch Exception _ nil)))))))))
+
+(defn check-stale-heartbeats!
+  "Check all cards in lanes with heartbeat_timeout for stale heartbeats.
+   Cards with no heartbeat for longer than the timeout are auto-blocked.
+   Returns list of cards that were blocked."
+  [board]
+  (let [now   (u/now-epoch)
+        all   (all-cards board)]
+    (->> all
+         (filter (fn [card]
+                   (let [lane-conf  (lane-by-name board (:lane card))
+                         timeout    (get lane-conf "heartbeat_timeout")
+                         timeout-s  (parse-duration timeout)]
+                     (and timeout-s
+                          (not (:blocked card))
+                          (:last-heartbeat card)
+                          (> (- now (:last-heartbeat card)) timeout-s)))))
+         (keep (fn [card]
+                 (let [lane-conf  (lane-by-name board (:lane card))
+                       timeout    (get lane-conf "heartbeat_timeout")
+                       reason (str "Agent heartbeat timeout (last heartbeat: "
+                                   (u/fmt-ts (:last-heartbeat card))
+                                   ", timeout: " timeout ")")]
+                   (try
+                     (let [updated (block! board (:id card) reason)]
+                       (run-hooks! board "heartbeat_missed" updated :reason reason)
+                       updated)
+                     (catch Exception _ nil))))))))
+
 ;; ── Advance / Done shortcuts ───────────────────────────────────
 
 (defn advance!
   "Move card to the next lane in the workflow. Returns [success? message gate-results]."
-  [board card-id & {:keys [agent] :or {agent ""}}]
+  [board card-id & {:keys [agent confidence] :or {agent "" confidence nil}}]
   (let [card   (load-card board card-id)
         names  (lane-names board)
         idx    (.indexOf names (:lane card))
         next   (when (and (>= idx 0) (< (inc idx) (count names)))
                  (nth names (inc idx)))]
     (if next
-      (move! board card-id next :agent agent)
+      (move! board card-id next :agent agent :confidence confidence)
       [false (str "Card is already in the last lane ('" (:lane card) "').") []])))
 
 (defn done!
@@ -989,9 +1248,45 @@
 
 ;; ── Context generation ─────────────────────────────────────────
 
+(defn- history-summary
+  "Summarize a sequence of history entries into a compact string."
+  [entries]
+  (let [actions (frequencies (map :action entries))
+        parts  (mapv (fn [[action cnt]]
+                       (str cnt " " action (when (> cnt 1) "s")))
+                     actions)]
+    (str/join ", " parts)))
+
+(defn- trim-to-budget
+  "Trim lines to fit within a character budget. Keeps the first and last lines,
+   dropping middle content with a truncation notice."
+  [lines budget]
+  (let [full (str/join "\n" lines)]
+    (if (<= (count full) budget)
+      lines
+      (loop [head (take 8 lines)
+             tail (take-last 4 lines)
+             rest-lines (drop 8 lines)]
+        (let [head' (if (> (count rest-lines) 4)
+                      (concat head [(str "... (" (count rest-lines) " earlier entries truncated) ...")])
+                      (concat head rest-lines))
+              result (vec (concat head' tail))]
+          (if (<= (count (str/join "\n" result)) budget)
+            result
+            (if (empty? rest-lines)
+              (vec (concat (take 4 lines) [(str "... (truncated to fit budget) ...")]))
+              (recur head tail (drop 1 rest-lines)))))))))
+
 (defn get-context
-  "Generate the full context string for a sub-agent system prompt."
-  [board card-id]
+  "Generate the full context string for a sub-agent system prompt.
+   Opts map supports:
+     :strategy   - :full (default), :recent (last 10 history), :summary (condensed history)
+     :budget     - max character count for output (nil = unlimited)
+     :since      - only include history entries after this epoch timestamp
+     :gates-only - only output gates information (for quick checks)
+     :deps-only  - only output dependency information"
+  ([board card-id] (get-context board card-id {}))
+  ([board card-id opts]
   (let [agent-command (get (:config board) "agent_command" "")]
     (when (str/blank? agent-command)
       (throw (ex-info
@@ -999,9 +1294,15 @@
                    "Add an agent_command field to .kanban/board.yaml. Example:\n"
                    "  agent_command: 'claude --system-prompt \"$(kb context {card_id})\" --cwd {worktree}'")
               {})))
-    (let [card      (load-card board card-id)
+    (let [strategy  (or (:strategy opts) (keyword (or (get (:config board) "context_strategy") "full")))
+          budget    (or (:budget opts) (when-let [b (get (:config board) "context_budget")]
+                                         (when (pos? b) b)))
+          since-ep  (:since opts)
+          card      (load-card board card-id)
           desc      (load-description board card-id)
-          history   (load-history board card-id)
+          history   (if since-ep
+                      (load-history board card-id since-ep)
+                      (load-history board card-id))
           diff-stat (get-diff-stat board card-id)
           base      (base-branch board)
           names     (lane-names board)
@@ -1031,82 +1332,196 @@
                                        (str ln ": " lc " card(s)"))))
                              (str/join ", "))
 
-          lines (-> [(str "# Task: " (:title card))
-                     (str "Card ID: " (:id card))
-                     (str "Lane: " (:lane card))
-                     (str "Branch: " (:branch card))
-                     (str "Worktree: " (:worktree card))
-                     (str "Base branch: " base)
-                     ""]
-                    (into (when (not (str/blank? desc))
-                             ["## Description" "" (str/trim desc) ""]))
-                    (into (when (seq next-gates)
-                             (into [(str "## Gates to pass (moving to '" (nth names (inc idx)) "')") ""]
-                                   (mapv #(str "- `" % "`") next-gates))))
-                    (into (when last-gfail
-                             ["## Last gate failure" ""
-                              (str "Gate: `" (:gate last-gfail "") "`")
-                              (str "Output: " (:content last-gfail))
-                              "Fix the issue above and retry with `kb move`." ""]))
-                    (into (when (and diff-stat (not (str/blank? diff-stat))
-                                     (not (str/includes? diff-stat "(no branch)")))
-                             ["## Current changes" "" "```" (str/trim diff-stat) "```" ""]))
-                    (into (when (seq recent-hnotes)
-                             (into ["## Recent human notes (IMPORTANT — read these)" ""]
-                                   (mapv (fn [e]
-                                           (str "- [" (u/fmt-time (:ts e)) "] "
-                                                (:action e) ": " (:content e)))
-                                         recent-hnotes))))
-                    (into (when (and (:pending-question card)
-                                    (not (str/blank? (:pending-question card))))
-                             ["## Your pending question" ""
-                              (:pending-question card)
-                              "Wait for a human to answer via `kb answer`." ""]))
-                    (into (when (not-empty board-summary)
-                             ["## Board summary" "" board-summary ""]))
-                    (into (when (seq lane-cards)
-                             (into ["## Other cards in your lane" ""]
-                                   (mapv #(str "- [" (:id %) "] " (:title %)
-                                               (when (:blocked %) " (BLOCKED)"))
-                                         lane-cards))))
-                    (into (when (seq blocked-cards)
-                             (into ["## Blocked cards" ""]
-                                   (mapv #(str "- [" (:id %) "] " (:title %)
-                                               " — " (:blocked-reason %))
-                                         blocked-cards))))
-                    (into (when (seq history)
-                             (into ["## History" ""]
-                                   (mapv (fn [entry]
-                                           (let [ts       (u/fmt-time (:ts entry))
-                                                 role     (:role entry "?")
-                                                 action   (:action entry "?")
-                                                 content  (:content entry "")
-                                                 agent-id (:agent-id entry "")
-                                                 gate     (:gate entry "")
-                                                 parts    (cond-> [(str "[" ts "]") (str role "/" action)]
-                                                            (not (str/blank? agent-id)) (conj (str "(agent: " agent-id ")"))
-                                                            (not (str/blank? gate))     (conj (str "(gate: " gate ")")))]
-                                             (str (str/join " " parts) ": " content)))
-                                         (take-last 30 history))))))]
+          ;; Gates-only mode: just output gates info
+          gates-output
+          (when (seq next-gates)
+            (into [(str "## Gates to pass (moving to '" (nth names (inc idx)) "')") ""]
+                  (mapv #(str "- `" % "`") next-gates)))
 
-      (str/join "\n"
-                (into lines
-                       ["## Instructions"
-                        ""
-                        "You are working on this card. Your working directory is the git worktree for this card."
-                        "Use these commands to interact with the board:"
-                        ""
-                        (str "- `kb note " card-id " \"<message>\"` -- log your thinking or progress")
-                        (str "- `kb ask " card-id " \"<question>\"` -- ask the human a question (card will be blocked until answered)")
-                        (str "- `kb advance " card-id "` -- move card to the next lane (runs gates)")
-                        (str "- `kb move " card-id " <lane>` -- move card to a specific lane (runs gates)")
-                        (str "- `kb log " card-id "` -- check for new human notes or answers")
-                        (str "- `kb diff " card-id "` -- see your changes vs the base branch")
-                        (str "- `kb heartbeat " card-id "` -- signal you are still working (call every 2 minutes)")
-                        ""
-                        "Before each major step, check `kb log` for new human instructions."
-                        "If you are unsure about something, use `kb ask` to ask the human."
-                        "When you believe the task is complete and tests pass, use `kb advance` to move forward."])))))
+          ;; Deps-only mode: just output dependency info
+          deps-output
+          (let [dep-lines (when (seq (:depends-on card))
+                            (let [usdeps (unsatisfied-deps board card)]
+                              (into [(str "## Dependencies (" (count (:depends-on card)) " total, "
+                                          (count usdeps) " unsatisfied)") ""]
+                                    (mapv (fn [dep-id]
+                                            (let [dep-card (load-card board dep-id)]
+                                              (str "- [" dep-id "] " (:title dep-card)
+                                                   " (" (:lane dep-card)
+                                                   (when (some #{dep-id} usdeps) " — UNSATISFIED") ")")))
+                                          (:depends-on card)))))
+                blocking (card-blocks board card-id)
+                block-lines (when (seq blocking)
+                              (into ["## This card blocks" ""]
+                                    (mapv #(str "- [" (:id %) "] " (:title %)) blocking)))]
+            (vec (concat dep-lines block-lines)))
+
+          ;; History based on strategy
+          history-lines
+          (condp = strategy
+            :summary
+            (when (seq history)
+              (let [recent   (take-last 5 history)
+                    older    (drop-last 5 history)]
+                (into ["## History (summary mode)" ""]
+                      (concat
+                        (when (seq older)
+                          [(str "Earlier activity: " (history-summary older) "")])
+                        (mapv (fn [entry]
+                                (let [ts       (u/fmt-time (:ts entry))
+                                      role     (:role entry "?")
+                                      action   (:action entry "?")
+                                      content  (:content entry "")
+                                      agent-id (:agent-id entry "")
+                                      parts    (cond-> [(str "[" ts "]") (str role "/" action)]
+                                                 (not (str/blank? agent-id)) (conj (str "(agent: " agent-id ")")))]
+                                  (str (str/join " " parts) ": " content)))
+                              recent)))))
+            :recent
+            (when (seq history)
+              (let [recent (take-last 10 history)]
+                (into ["## History (last 10 entries)" ""]
+                      (mapv (fn [entry]
+                              (let [ts       (u/fmt-time (:ts entry))
+                                    role     (:role entry "?")
+                                    action   (:action entry "?")
+                                    content  (:content entry "")
+                                    agent-id (:agent-id entry "")
+                                    parts    (cond-> [(str "[" ts "]") (str role "/" action)]
+                                               (not (str/blank? agent-id)) (conj (str "(agent: " agent-id ")")))]
+                                (str (str/join " " parts) ": " content)))
+                            recent))))
+            ;; :full (default)
+            (when (seq history)
+              (into ["## History" ""]
+                    (mapv (fn [entry]
+                            (let [ts       (u/fmt-time (:ts entry))
+                                  role     (:role entry "?")
+                                  action   (:action entry "?")
+                                  content  (:content entry "")
+                                  agent-id (:agent-id entry "")
+                                  gate     (:gate entry "")
+                                  parts    (cond-> [(str "[" ts "]") (str role "/" action)]
+                                             (not (str/blank? agent-id)) (conj (str "(agent: " agent-id ")"))
+                                             (not (str/blank? gate))     (conj (str "(gate: " gate ")")))]
+                              (str (str/join " " parts) ": " content)))
+                          (take-last 30 history)))))
+
+          ;; Handle focused modes
+          lines (cond
+                  (:gates-only opts)
+                  (vec (concat
+                         [(str "# Task: " (:title card))
+                          (str "Card ID: " (:id card))
+                          (str "Lane: " (:lane card))
+                          ""]
+                         gates-output
+                         (when last-gfail
+                           ["## Last gate failure" ""
+                            (str "Gate: `" (:gate last-gfail "") "`")
+                            (str "Output: " (:content last-gfail))])))
+
+                  (:deps-only opts)
+                  (vec (concat
+                         [(str "# Task: " (:title card))
+                          (str "Card ID: " (:id card))
+                          (str "Lane: " (:lane card))
+                          ""]
+                         deps-output))
+
+                  :else
+                  (-> [(str "# Task: " (:title card))
+                       (str "Card ID: " (:id card))
+                       (str "Lane: " (:lane card))
+                       (str "Branch: " (:branch card))
+                       (str "Worktree: " (:worktree card))
+                       (str "Base branch: " base)
+                       ""]
+                      (into (when (not (str/blank? desc))
+                               ["## Description" "" (str/trim desc) ""]))
+                      (into gates-output)
+                      (into (when last-gfail
+                               ["## Last gate failure" ""
+                                (str "Gate: `" (:gate last-gfail "") "`")
+                                (str "Output: " (:content last-gfail))
+                                "Fix the issue above and retry with `kb move`." ""]))
+                      (into (when (and diff-stat (not (str/blank? diff-stat))
+                                       (not (str/includes? diff-stat "(no branch)")))
+                               ["## Current changes" "" "```" (str/trim diff-stat) "```" ""]))
+                      (into (when (seq recent-hnotes)
+                               (into ["## Recent human notes (IMPORTANT — read these)" ""]
+                                     (mapv (fn [e]
+                                             (str "- [" (u/fmt-time (:ts e)) "] "
+                                                  (:action e) ": " (:content e)))
+                                           recent-hnotes))))
+                      (into (when (and (:pending-question card)
+                                      (not (str/blank? (:pending-question card))))
+                               ["## Your pending question" ""
+                                (:pending-question card)
+                                "Wait for a human to answer via `kb answer`." ""]))
+                      (into (when (not-empty board-summary)
+                               ["## Board summary" "" board-summary ""]))
+                      (into deps-output)
+                      (into (when (seq lane-cards)
+                               (into ["## Other cards in your lane" ""]
+                                     (mapv #(str "- [" (:id %) "] " (:title %)
+                                                 (when (:blocked %) " (BLOCKED)"))
+                                           lane-cards))))
+                      (into (when (seq blocked-cards)
+                               (into ["## Blocked cards" ""]
+                                     (mapv #(str "- [" (:id %) "] " (:title %)
+                                                 " — " (:blocked-reason %))
+                                           blocked-cards))))
+                      (into history-lines)))]
+
+      ;; Apply budget trimming if configured
+      (let [final-lines (if budget
+                          (trim-to-budget lines budget)
+                          lines)]
+        (str/join "\n"
+                  (into final-lines
+                         ["## Instructions"
+                          ""
+                          "You are working on this card. Your working directory is the git worktree for this card."
+                          "Use these commands to interact with the board:"
+                          ""
+                          (str "- `kb note " card-id " \"<message>\"` -- log your thinking or progress")
+                          (str "- `kb ask " card-id " \"<question>\"` -- ask the human a question (card will be blocked until answered)")
+                          (str "- `kb advance " card-id "` -- move card to the next lane (runs gates)")
+                          (str "- `kb move " card-id " <lane>` -- move card to a specific lane (runs gates)")
+                          (str "- `kb log " card-id "` -- check for new human notes or answers")
+                          (str "- `kb diff " card-id "` -- see your changes vs the base branch")
+                          (str "- `kb heartbeat " card-id "` -- signal you are still working (call every 2 minutes)")
+                          ""
+                          "Before each major step, check `kb log` for new human instructions."
+                          "If you are unsure about something, use `kb ask` to ask the human."
+                          "When you believe the task is complete and tests pass, use `kb advance` to move forward."])))))))
+
+(defn compact-history!
+  "Permanently compress older history entries into a single summary entry.
+   Keeps the last N entries intact, replaces everything before with one summary line."
+  [board card-id & {:keys [keep] :or {keep 10}}]
+  (let [history  (load-history board card-id)
+        total    (count history)]
+    (if (<= total keep)
+      {:compacted false :message "History is already compact enough."}
+      (let [older     (drop-last keep history)
+            newer     (take-last keep history)
+            summary   (str "Compacted " (count older) " earlier entries: " (history-summary older))
+            compact-entry (make-history-entry "system" "compacted" :content summary)]
+        ;; Rewrite history: compact-entry + newer entries
+        (let [d         (find-card-dir board card-id)
+              hist-path (u/path-resolve d "history.jsonl")
+              all-entries (conj (into [compact-entry] newer))]
+          ;; Write all entries back
+          (u/atomic-write! hist-path
+                          (str/join "\n" (mapv (fn [e]
+                                                 (json/generate-string (history-entry->json-map e)))
+                                               all-entries))))
+        {:compacted true
+         :removed (count older)
+         :kept keep
+         :message (str "Compacted " (count older) " entries into 1 summary.")}))))
 
 ;; ── Init board ────────────────────────────────────────────────
 
