@@ -182,6 +182,36 @@
   (println "\n== Cleanup ==")
   (cleanup dir))
 
+;; ── Worktree root resolution test ───────────────────────────────
+
+(let [dir (make-repo)]
+  (println "\n== Worktree root resolution ==")
+  (let [r (kb dir "init")]
+    (T "wt: init exits 0" (:ok r) "init failed"))
+
+  ;; Add a card and pull it (creates worktree)
+  (let [r (kb dir "add" "Worktree card")]
+    (T "wt: add exits 0" (:ok r) "add failed"))
+  (let [r (kb dir "pull" "001" "--agent" "test-bot" "--lane" "in-progress")]
+    (T "wt: pull exits 0" (:ok r) "pull failed"))
+
+  ;; Find worktree path from card metadata
+  (let [show-r (kb dir "show" "001")
+        wt-match (re-find #"Worktree:\s+(\S+)" (txt show-r))
+        wt-path  (second wt-match)]
+    (T "wt: pull created worktree" (some? wt-path) "no worktree path in show")
+
+    ;; The key test: kb status from INSIDE the worktree should find
+    ;; the same board (at the project root), not a stale shadow copy
+    (when wt-path
+      (let [status-r (kb wt-path "status")]
+        (T "wt: status from worktree exits 0" (:ok status-r) "status failed from worktree")
+        (T "wt: status shows all cards" (str/includes? (txt status-r) "BACKLOG")
+            (str "status from worktree missing cards: " (txt status-r))))))
+
+  (println "\n== Worktree cleanup ==")
+  (cleanup dir))
+
 ;; ── Summary ────────────────────────────────────────────────────
 
 (println (str "\n" (apply str (repeat 50 "="))))

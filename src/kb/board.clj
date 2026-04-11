@@ -1145,4 +1145,16 @@
                         {"name"    "done"
                          "on_enter" "merge"}]})]
          (u/spit-yaml (u/path-resolve root u/board-file) tmpl)
+
+         ;; Add .kanban/ to .gitignore if not already present
+         (let [gitignore-path (u/path-resolve project-root ".gitignore")
+               existing-lines (when (u/path-exists? gitignore-path)
+                                (str/split-lines (slurp (str gitignore-path))))
+               kanban-entries (filter #(let [l (str/trim %)]
+                                          (or (= l (str u/kanban-dir "/"))
+                                              (= l u/kanban-dir)))
+                                      existing-lines)]
+           (when (empty? kanban-entries)
+             (spit (str gitignore-path) (str u/kanban-dir "/\n") :append true)))
+
          (make-board root))))))

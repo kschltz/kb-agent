@@ -120,16 +120,48 @@
 
 ;; ── Find root ────────────────────────────────────────────────
 
+(defn git-root
+  "Find the main git repository root from start directory.
+   Uses --git-common-dir which returns the primary .git directory even
+   inside worktrees. The parent of that path is the main working tree.
+   Returns Path or nil if not in a git repo."
+  ([] (git-root "."))
+  ([start]
+   (try
+     (let [dir   (str (.toAbsolutePath (->path start)))
+           r      (git :args ["rev-parse" "--git-common-dir"] :cwd dir)]
+       (when (and (= 0 (:exit r)) (not-empty (str/trim (:out r))))
+         (let [common-dir-str (str/trim (:out r))
+               common-dir     (.toAbsolutePath (->path common-dir-str))]
+           ;; For non-bare repos, common dir ends in .git — parent is repo root.
+           ;; For bare repos, fall back to --show-toplevel.
+           (if (str/ends-with? common-dir-str "/.git")
+             (.getParent common-dir)
+             (let [r2 (git :args ["rev-parse" "--show-toplevel"] :cwd dir)]
+               (when (and (= 0 (:exit r2)) (not-empty (str/trim (:out r2))))
+                 (.toAbsolutePath (->path (str/trim (:out r2))))))))))
+     (catch Exception _ nil))))
+
 (defn find-root
-  "Walk up from start to find nearest .kanban/ directory. Returns Path."
+  "Find the .kanban/ directory, preferring the git repo root.
+   When inside a git worktree, the worktree may contain a stale .kanban/
+   copy from git tracking. We avoid this by anchoring to the git root first.
+   Falls back to walking up from start for non-git directories."
   ([] (find-root "."))
   ([start]
-   (loop [p (.toAbsolutePath (->path start))]
-     (let [candidate (path-resolve p kanban-dir)]
-       (cond
-         (path-directory? candidate) candidate
-         (= p (.getParent p))        (throw (ex-info "No .kanban/ directory found. Run `kb init` first." {}))
-         :else                        (recur (.getParent p)))))))
+   (or
+    ;; 1. Try git repo root first (avoids stale .kanban/ in worktrees)
+    (let [root (git-root start)]
+      (when root
+        (let [candidate (path-resolve root kanban-dir)]
+          (when (path-directory? candidate) candidate))))
+    ;; 2. Walk up from start as fallback
+    (loop [p (.toAbsolutePath (->path start))]
+      (let [candidate (path-resolve p kanban-dir)]
+        (cond
+          (path-directory? candidate) candidate
+          (= p (.getParent p))        (throw (ex-info "No .kanban/ directory found. Run `kb init` first." {}))
+          :else                        (recur (.getParent p))))))))
 
 ;; ── Time helpers ─────────────────────────────────────────────
 
