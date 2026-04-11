@@ -78,7 +78,7 @@ Each line is a JSON object with a required schema:
 
 **Roles:** `system` (board events), `human` (user interventions from UI or CLI), `agent` (sub-agent actions).
 
-**Actions:** `created`, `moved`, `note`, `thinking`, `tool_use`, `gate_pass`, `gate_fail`, `blocked`, `unblocked`, `pulled`, `rejected`, `diff_snapshot`.
+**Actions:** `created`, `moved`, `note`, `thinking`, `tool_use`, `gate_pass`, `gate_fail`, `blocked`, `unblocked`, `pulled`, `rejected`, `ask`, `answer`, `edited`, `heartbeat`, `approved`, `diff_snapshot`.
 
 **Sub-agent spawning:**
 
@@ -97,21 +97,19 @@ agent_command: "claude --system-prompt \"$(kb context {card_id})\" --cwd {worktr
 
 `kb context <card-id>` outputs the full card context (description + history + board rules) formatted as a system prompt.
 
-### 2.7 Web UI: React + shadcn, pre-built SPA
+### 2.7 Web UI: self-contained HTML/JS SPA
 
-The web UI is a React SPA using shadcn/ui components, built ahead of time and shipped as static assets with the package. The user never needs Node — `kb serve` just serves static files plus a WebSocket endpoint.
+The web UI is a single-page app written in plain HTML, CSS, and JavaScript — no build step or Node.js required for serving. `kb serve` serves the static HTML plus a WebSocket endpoint for live updates.
 
 **Stack:**
 
-- React 18 + TypeScript
-- shadcn/ui components (Radix primitives)
-- Tailwind CSS
-- @dnd-kit for drag-and-drop
-- WebSocket client for live updates
-- Diff viewer with syntax highlighting
-- Vite for build (dev only)
+- Vanilla HTML/CSS/JS (no framework)
+- WebSocket client for live board updates
+- Drag-and-drop via HTML5 API
+- Syntax-highlighted diff viewer
+- Tailwind CSS + shadcn/ui components available in separate React dev UI (`web/`)
 
-**Served by:** Python async HTTP server that also handles the WebSocket endpoint. Static files bundled into the Python package under `kb/web/dist/`.
+**Served by:** Babashka HTTP server that also handles the WebSocket endpoint. The self-contained UI is embedded in `src/kb/ui.html`; a React-based dev UI lives in `web/` for iteration.
 
 
 ## 3. Architecture
@@ -126,11 +124,10 @@ project-root/
       001-fix-auth-bug/
         meta.yaml                 # Card state: lane, priority, blocked, agent, timestamps
         history.jsonl             # Structured conversation log (see 2.6)
-        description.md            # Card description / acceptance criteria
+        description.md            # Card description / acceptance criteria (optional)
       002-add-user-tests/
         meta.yaml
         history.jsonl
-        description.md
     worktrees/
       001/  -> git worktree       # Isolated working copy for card 001
       002/  -> git worktree       # Isolated working copy for card 002
@@ -184,20 +181,28 @@ lanes:
 |---|---|
 | `kb init` | Create `.kanban/`, verify git repo, record base branch |
 | `kb add <title> [--desc FILE]` | Create a card in backlog with optional description |
-| `kb pull [--lane] [--agent] [--spawn]` | Claim next card, create worktree + branch, optionally spawn sub-agent |
+| `kb pull [--lane] [--agent] [--spawn]` | Claim next available card (excludes done lane), create worktree + branch, optionally spawn sub-agent |
 | `kb move <card> <lane>` | Move card; run gates; merge on entering `done` if configured |
+| `kb advance <card>` | Move card to next lane (shortcut) |
+| `kb done <card>` | Move card to final lane, running all gates |
 | `kb reject <card> [--reason]` | Push card back to previous lane |
 | `kb block <card> [--reason]` | Block card (agents skip it, UI shows it) |
 | `kb unblock <card>` | Remove block |
+| `kb ask <card> <question>` | Ask the human a question (blocks card until answered) |
+| `kb answer <card> <answer>` | Answer a pending question (unblocks card) |
+| `kb approve <card>` | Approve a card pending approval |
 | `kb note <card> <message>` | Append structured note to history |
-| `kb log <card>` | Show structured conversation history |
-| `kb diff <card>` | Show git diff of card's branch vs base |
+| `kb log <card> [--since TS]` | Show structured conversation history |
+| `kb diff <card> [--stat]` | Show git diff of card's branch vs base |
 | `kb show <card>` | Full card details: meta + history + diff stats |
+| `kb gates <card>` | Show gates for the next lane transition |
+| `kb edit <card> [--title ...] [--priority N] [--desc ...]` | Edit card fields |
+| `kb heartbeat <card>` | Record an agent heartbeat (signal you're alive) |
 | `kb status` | Print the board |
 | `kb context <card>` | Output card context formatted for agent system prompt |
 | `kb spawn <card>` | Start a sub-agent scoped to this card |
 | `kb cleanup <card>` | Remove worktree, optionally delete branch |
-| `kb serve [--port 8741]` | Start web UI |
+| `kb serve [--host 0.0.0.0] [--port 8741]` | Start web UI |
 
 All commands accept `--json`. Mutating commands accept `--agent <id>`.
 
@@ -237,7 +242,7 @@ All commands accept `--json`. Mutating commands accept `--agent <id>`.
 1. Human creates a task
    $ kb add "Fix JWT token expiration bug" --desc fix-jwt.md
 
-2. Agent pulls the card -- worktree + branch are created
+2. Agent pulls the card -- worktree + branch are created (cards in the done lane are skipped)
    $ kb pull --agent claude-01 --spawn
    -> creates branch kb/001-fix-jwt-token-expiration
    -> creates worktree at .kanban/worktrees/001/
@@ -334,8 +339,9 @@ Leaning toward poll-based. The agent's system prompt includes instructions to ch
 
 ### Phase 2: Web UI
 
-- Python async HTTP + WebSocket server
-- React + shadcn SPA (Vite build, output bundled into package)
+- Babashka HTTP + WebSocket server (with file watcher for live state)
+- Self-contained HTML/JS SPA (no Node required to serve)
+- React + shadcn dev UI (Vite build, for iteration)
 - Board view with drag-and-drop (@dnd-kit)
 - Card detail sheet with conversation timeline and diff viewer
 - Live updates via filesystem watcher + WebSocket

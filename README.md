@@ -172,9 +172,9 @@ Auto-opens the browser. Serves a live board view at `http://localhost:8741` with
   board.yaml              # Lane definitions, gates, WIP limits
   cards/
     001-fix-auth-bug/
-      card.yaml           # Card state: lane, priority, blocked, agent
-      history.jsonl       # Structured conversation log
-      description.md      # Card description / acceptance criteria
+      meta.yaml           # Card state: lane, priority, blocked, agent
+      history.jsonl        # Structured conversation log
+      description.md      # Card description / acceptance criteria (optional)
   worktrees/
     001/                   # Isolated git worktree for card 001
 ```
