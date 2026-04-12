@@ -73,7 +73,7 @@
                          {:ts (u/now-epoch)
                           :role "system"
                           :action "spawned"
-                          :content (str "Sub-agent spawned (parallel): " cmd)})
+                          :content (str "Sub-agent spawned (parallel) for card " (:id card))})
       (try
         (let [p (proc/process {:dir (or (:worktree card) ".")
                                 :out :capture

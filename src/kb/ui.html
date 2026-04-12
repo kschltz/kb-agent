@@ -1127,17 +1127,28 @@ function refreshDetail() {
       const block = diffSec.querySelector('.diff-block');
       const vis = diffSec.querySelector('.diff-stat-visual');
       if (block.style.display === 'none') {
-        send({ action: 'diff', card_id: card.id });
-        const origHandler = ws.onmessage;
-        ws.onmessage = (ev) => {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'result' && msg.data.diff !== undefined) {
-            showFullDiff(msg.data.diff, diffSec);
-            ws.onmessage = origHandler;
-          } else {
-            origHandler(ev);
-          }
-        };
+        // Fetch diff via REST API
+        fetch(`/api/cards/${card.id}/diff`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.diff) {
+              showFullDiff(data.diff, diffSec);
+            }
+          })
+          .catch(() => {
+            // Fallback to WebSocket if REST fails
+            send({ action: 'diff', card_id: card.id });
+            const origHandler = ws.onmessage;
+            ws.onmessage = (ev) => {
+              const msg = JSON.parse(ev.data);
+              if (msg.type === 'result' && msg.data.diff !== undefined) {
+                showFullDiff(msg.data.diff, diffSec);
+                ws.onmessage = origHandler;
+              } else {
+                origHandler(ev);
+              }
+            };
+          });
       } else {
         vis.style.display = '';
         block.style.display = 'none';

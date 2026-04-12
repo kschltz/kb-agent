@@ -72,8 +72,8 @@
                                            (get by-lane lane-name [])))))
                           (get (:config b) "lanes" []))
        :timestamp   (util/now-epoch)})
-    (catch Exception _
-      {:error "No .kanban/ found"}))))
+    (catch Exception e
+      {:error (str "No .kanban/ found: " (.getMessage e))}))))
 
 ;; ── Command dispatch ─────────────────────────────────────────
 
@@ -245,6 +245,20 @@
         {:status  200
          :headers {"Content-Type" "application/json"}
          :body    (json/generate-string (get-board-state kanban-root))}
+
+        ;; REST: GET /api/cards/:id/diff
+        (and (str/starts-with? uri "/api/cards/")
+             (str/ends-with? uri "/diff"))
+        (let [card-id (second (re-matches #"/api/cards/([^/]+)/diff" uri))]
+          (if card-id
+            (let [b (board/make-board kanban-root)]
+              {:status  200
+               :headers {"Content-Type" "application/json"}
+               :body    (json/generate-string {:card_id card-id
+                                                :diff    (board/get-diff b card-id)})})
+            {:status 400
+             :headers {"Content-Type" "application/json"}
+             :body    (json/generate-string {:error "Invalid card ID"})}))
 
         ;; Root / index
         (contains? #{"/" "/index.html"} uri)
