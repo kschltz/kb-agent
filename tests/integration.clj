@@ -483,6 +483,48 @@
   (println "\n== Confidence cleanup ==")
   (cleanup dir))
 
+;; ── kb whoami ──────────────────────────────────────────────────
+
+(let [dir (make-repo)]
+
+  (println "\n== whoami ==")
+  (let [r (kb dir "init")]
+    (T "whoami: init exits 0" (:ok r) "init failed"))
+
+  ;; Add and pull a card to create a worktree
+  (kb dir "add" "Whoami test card")
+  (kb dir "pull" "001" "--agent" "test-bot" "--lane" "in-progress")
+
+  ;; Find the worktree path
+  (let [show-r  (kb dir "show" "001")
+        wt-match (re-find #"Worktree:\s+(\S+)" (txt show-r))
+        wt-path  (second wt-match)]
+    (T "whoami: worktree created" (some? wt-path) "no worktree in show output")
+
+    (when wt-path
+      ;; From inside the worktree — should identify card 001
+      (let [r (kb wt-path "whoami")]
+        (T "whoami: exits 0 from worktree" (:ok r) (str "exit " (:exit r) ": " (:err r)))
+        (T "whoami: shows card id" (str/includes? (txt r) "#001") (txt r))
+        (T "whoami: shows lane" (str/includes? (txt r) "in-progress") (txt r)))
+
+      ;; --json mode
+      (let [r (kb wt-path "whoami" "--json")]
+        (T "whoami: json exits 0" (:ok r) (:err r))
+        (T "whoami: json has id field" (str/includes? (txt r) "\"id\"") (txt r)))
+
+      ;; --export mode
+      (let [r (kb wt-path "whoami" "--export")]
+        (T "whoami: export exits 0" (:ok r) (:err r))
+        (T "whoami: export has KB_CARD_ID" (str/includes? (txt r) "KB_CARD_ID=001") (txt r)))))
+
+  ;; Outside a worktree — should exit non-zero
+  (let [r (kb dir "whoami")]
+    (T "whoami: fails outside worktree" (not (:ok r)) "should fail outside worktree"))
+
+  (println "\n== whoami cleanup ==")
+  (cleanup dir))
+
 ;; ── Summary ────────────────────────────────────────────────────
 
 (println (str "\n" (apply str (repeat 50 "="))))

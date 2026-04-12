@@ -813,6 +813,66 @@
       (Thread/sleep (* interval 1000))
       (recur))))
 
+(defn cmd-whoami
+  "Identify the current card from cwd.
+   Walks up from cwd looking for .kanban/worktrees/{id} in the path,
+   then falls back to 'git worktree list' cross-referencing."
+  [{:keys [opts]}]
+  (let [cwd      (System/getProperty "user.dir")
+        ;; Method 1: .kanban/worktrees/{id} in path string
+        id-from-path (let [m (re-find #"\.kanban/worktrees/(\d+)" cwd)]
+                       (when m (second m)))
+        ;; Method 2: git worktree list --porcelain
+        id-from-git  (when-not id-from-path
+                       (try
+                         (let [result (proc/shell {:out :string :err :string :continue true}
+                                                  "git" "worktree" "list" "--porcelain")
+                               worktrees (->> (str/split-lines (:out result))
+                                              (filter #(str/starts-with? % "worktree "))
+                                              (map #(subs % (count "worktree "))))]
+                           (->> worktrees
+                                (filter #(and (str/starts-with? cwd %)
+                                              (re-find #"\.kanban/worktrees/\d+" %)))
+                                (some (fn [wt]
+                                        (when-let [m (re-find #"\.kanban/worktrees/(\d+)" wt)]
+                                          (second m))))))
+                         (catch Exception _ nil)))
+        card-id (or id-from-path id-from-git)]
+    (if-not card-id
+      (do
+        (binding [*out* *err*]
+          (println "Not inside a kb worktree. Run this from within a card's worktree directory."))
+        (System/exit 1))
+      (let [board (b/make-board)
+            card  (b/load-card board card-id)]
+        (cond
+          (:json opts)
+          (out-json {:id             (:id card)
+                     :title          (:title card)
+                     :lane           (:lane card)
+                     :branch         (:branch card)
+                     :worktree       (:worktree card)
+                     :base_branch    (b/base-branch board)
+                     :assigned_agent (:assigned-agent card)})
+
+          (:export opts)
+          (do
+            (println (str "export KB_CARD_ID=" (:id card)))
+            (println (str "export KB_CARD_TITLE=" (pr-str (:title card))))
+            (println (str "export KB_LANE=" (:lane card)))
+            (println (str "export KB_BRANCH=" (or (:branch card) "")))
+            (println (str "export KB_WORKTREE=" (or (:worktree card) "")))
+            (println (str "export KB_BASE_BRANCH=" (b/base-branch board))))
+
+          :else
+          (do
+            (println (str "Card:     #" (:id card) " — " (:title card)))
+            (println (str "Lane:     " (:lane card)))
+            (println (str "Branch:   " (or (not-empty (:branch card)) "(none)")))
+            (println (str "Worktree: " (or (not-empty (:worktree card)) "(none)")))
+            (println (str "Agent:    " (or (not-empty (:assigned-agent card)) "(none)")))
+            (println (str "Base:     " (b/base-branch board)))))))))
+
 (defn cmd-help
   [{:keys [opts]}]
   (if (:agent opts)
@@ -843,6 +903,7 @@
       (println "  edit     <card-id> [opts]               Edit card title, priority, description, or tags")
       (println "  heartbeat <card-id> [opts]              Record an agent heartbeat")
       (println "  watch    [--interval 60]                Watch for stale heartbeats and expired approvals")
+      (println "  whoami   [--json] [--export]            Identify current card from working directory")
       (println "  status   [opts]                         Show board status")
       (println "  context  <card-id> [opts]               Output card context for agent prompt")
       (println "  spawn    <card-id>                      Spawn a sub-agent for a card")
@@ -914,6 +975,7 @@
    {:cmds ["deps"] :fn cmd-deps :args->opts [:card-id]}
    {:cmds ["serve"] :fn cmd-serve}
    {:cmds ["recover"] :fn cmd-recover}
+   {:cmds ["whoami"] :fn cmd-whoami}
    {:cmds ["help"] :fn cmd-help}
    {:cmds [] :fn cmd-help}])
 
