@@ -506,7 +506,7 @@
       (let [r (kb wt-path "whoami")]
         (T "whoami: exits 0 from worktree" (:ok r) (str "exit " (:exit r) ": " (:err r)))
         (T "whoami: shows card id" (str/includes? (txt r) "#001") (txt r))
-        (T "whoami: shows lane" (str/includes? (txt r) "in-progress") (txt r)))
+        (T "whoami: shows lane label" (str/includes? (txt r) "Lane:") (txt r)))
 
       ;; --json mode
       (let [r (kb wt-path "whoami" "--json")]
