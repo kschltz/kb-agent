@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -30,8 +31,10 @@ export function Lane({ lane, onCardClick }: LaneProps) {
     data: { type: 'lane', laneName: lane.name },
   });
 
+  const [showInstructions, setShowInstructions] = useState(false);
   const maxWip = lane.max_wip ?? '∞';
   const count = lane.cards.length;
+  const hasInstructions = !!lane.instructions?.trim();
 
   const style: React.CSSProperties = {
     flex: 1, minWidth: 260, maxWidth: 400,
@@ -69,8 +72,35 @@ export function Lane({ lane, onCardClick }: LaneProps) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-2)' }}>
           <span style={{ padding: '1px 6px', background: 'var(--bg-3)', borderRadius: 3 }}>{count}/{maxWip}</span>
           {lane.max_parallelism && <span title="Max parallelism">⊞{lane.max_parallelism}</span>}
+          {hasInstructions && (
+            <button
+              onClick={() => setShowInstructions(v => !v)}
+              title={showInstructions ? 'Hide lane instructions' : 'Show lane instructions'}
+              style={{
+                background: showInstructions ? 'var(--bg-3)' : 'transparent',
+                border: `1px solid ${showInstructions ? 'var(--border-hi)' : 'transparent'}`,
+                color: showInstructions ? 'var(--blue)' : 'var(--text-2)',
+                borderRadius: 3, cursor: 'pointer',
+                fontFamily: 'var(--mono)', fontSize: 10, padding: '1px 5px',
+                lineHeight: 1.4,
+              }}>ℹ</button>
+          )}
         </div>
       </div>
+
+      {showInstructions && hasInstructions && (
+        <div style={{
+          padding: '8px 12px', borderBottom: '1px solid var(--border)',
+          background: 'var(--bg-2)', flexShrink: 0,
+          maxHeight: 180, overflowY: 'auto',
+        }}>
+          <pre style={{
+            margin: 0, fontFamily: 'var(--mono)', fontSize: 10,
+            color: 'var(--text-1)', lineHeight: 1.6,
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          }}>{lane.instructions}</pre>
+        </div>
+      )}
 
       <div ref={setDropRef} style={{
         flex: 1, overflowY: 'auto', padding: 8,

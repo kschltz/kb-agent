@@ -10,6 +10,7 @@ export interface Lane {
   name: string;
   max_wip?: number;
   max_parallelism?: number;
+  instructions?: string;
   cards: CardData[];
   [key: string]: unknown;
 }
