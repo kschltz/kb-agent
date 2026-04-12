@@ -102,7 +102,8 @@
       (let [board (b/init-board! path)]
         (println (str "Initialized kanban board at " (:root board)))
         (println (str "Base branch: " (b/base-branch board)))
-        (println "Edit .kanban/board.yaml to configure lanes and gates."))
+        (println "Edit .kanban/board.yaml to configure lanes and gates.")
+        (println "Agent instructions appended to CLAUDE.md."))
       (catch Exception e
         (fail! (.getMessage e))))))
 
@@ -756,37 +757,44 @@
       (recur))))
 
 (defn cmd-help
-  [_]
-  (println "Usage: kb <command> [options]")
-  (println)
-  (println "Commands:")
-  (println "  init     [--path .]                     Initialize a new kanban board")
-  (println "  add      <title> [opts]                 Add a card to the board")
-  (println "  pull     [opts]                         Pull next available card")
-  (println "  move     <card-id> <lane> [opts]        Move a card to a lane (runs gates)")
-  (println "  advance  <card-id> [opts]              Move card to next lane (runs gates)")
-  (println "  done     <card-id> [opts]              Move card to final lane (runs all gates)")
-  (println "  reject   <card-id> [opts]               Reject a card back to previous lane")
-  (println "  block    <card-id> [opts]               Block a card")
-  (println "  unblock  <card-id> [opts]               Unblock a card")
-  (println "  approve  <card-id> [opts]               Approve a card pending approval")
-  (println "  ask      <card-id> <question> [opts]    Ask the human a question (blocks card)")
-  (println "  answer   <card-id> <answer> [opts]     Answer a pending question (unblocks card)")
-  (println "  note     <card-id> <message> [opts]     Add a note to a card")
-  (println "  log      <card-id> [opts]               Show card history")
-  (println "  diff     <card-id> [opts]               Show card diff vs base branch")
-  (println "  show     <card-id> [opts]               Show card details")
-  (println "  gates    <card-id> [opts]               Show gates for the next lane transition")
-  (println "  edit     <card-id> [opts]               Edit card title, priority, description, or tags")
-  (println "  heartbeat <card-id> [opts]              Record an agent heartbeat")
-  (println "  watch    [--interval 60]                Watch for stale heartbeats and expired approvals")
-  (println "  status   [opts]                         Show board status")
-  (println "  context  <card-id> [opts]               Output card context for agent prompt")
-  (println "  spawn    <card-id>                      Spawn a sub-agent for a card")
-  (println "  cleanup  <card-id> [opts]               Remove worktree for a card")
-  (println "  serve    [--host 127.0.0.1] [--port 8741]  Start web UI server")
-  (println "  recover  [opts]                         Detect and clean orphaned resources")
-  (System/exit 1))
+  [{:keys [opts]}]
+  (if (:agent opts)
+    ;; Agent-friendly output — workflow + quick reference
+    (print (b/agent-instructions))
+    ;; Human-friendly output — flag list
+    (do
+      (println "Usage: kb <command> [options]")
+      (println)
+      (println "Commands:")
+      (println "  init     [--path .]                     Initialize a new kanban board")
+      (println "  add      <title> [opts]                 Add a card to the board")
+      (println "  pull     [opts]                         Pull next available card")
+      (println "  move     <card-id> <lane> [opts]        Move a card to a lane (runs gates)")
+      (println "  advance  <card-id> [opts]              Move card to next lane (runs gates)")
+      (println "  done     <card-id> [opts]              Move card to final lane (runs all gates)")
+      (println "  reject   <card-id> [opts]               Reject a card back to previous lane")
+      (println "  block    <card-id> [opts]               Block a card")
+      (println "  unblock  <card-id> [opts]               Unblock a card")
+      (println "  approve  <card-id> [opts]               Approve a card pending approval")
+      (println "  ask      <card-id> <question> [opts]    Ask the human a question (blocks card)")
+      (println "  answer   <card-id> <answer> [opts]     Answer a pending question (unblocks card)")
+      (println "  note     <card-id> <message> [opts]     Add a note to a card")
+      (println "  log      <card-id> [opts]               Show card history")
+      (println "  diff     <card-id> [opts]               Show card diff vs base branch")
+      (println "  show     <card-id> [opts]               Show card details")
+      (println "  gates    <card-id> [opts]               Show gates for the next lane transition")
+      (println "  edit     <card-id> [opts]               Edit card title, priority, description, or tags")
+      (println "  heartbeat <card-id> [opts]              Record an agent heartbeat")
+      (println "  watch    [--interval 60]                Watch for stale heartbeats and expired approvals")
+      (println "  status   [opts]                         Show board status")
+      (println "  context  <card-id> [opts]               Output card context for agent prompt")
+      (println "  spawn    <card-id>                      Spawn a sub-agent for a card")
+      (println "  cleanup  <card-id> [opts]               Remove worktree for a card")
+      (println "  serve    [--host 127.0.0.1] [--port 8741]  Start web UI server")
+      (println "  recover  [opts]                         Detect and clean orphaned resources")
+      (println)
+      (println "Use `kb help --agent` for agent-friendly workflow instructions.")
+      (System/exit 1))))
 
 ;; ── Dispatch table ────────────────────────────────────────────
 
@@ -849,6 +857,7 @@
    {:cmds ["deps"] :fn cmd-deps :args->opts [:card-id]}
    {:cmds ["serve"] :fn cmd-serve}
    {:cmds ["recover"] :fn cmd-recover}
+   {:cmds ["help"] :fn cmd-help}
    {:cmds [] :fn cmd-help}])
 
 ;; ── Entry point ───────────────────────────────────────────────
