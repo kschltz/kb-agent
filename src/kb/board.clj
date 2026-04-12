@@ -240,8 +240,7 @@
 ;; ── Lane instructions ─────────────────────────────────────────
 
 (def default-lane-instructions
-  "Default instructions for common lane names. Users can override per-lane
-   by adding an `instructions` key to the lane config in board.yaml."
+  "Fallback instructions for lanes without a markdown file or config override."
   {"backlog"     "This card is waiting to be picked up. Do not start work yet — use `kb advance` when ready."
    "discovery"   "Research and understand the problem. Read the codebase, identify affected files, understand constraints. Do NOT implement yet — produce findings only. Log your discoveries with `kb note`. When you understand the problem fully, `kb advance` to plan."
    "plan"         "Design your approach. Break the task into concrete steps, identify files to create or modify, consider edge cases. Write your plan as a `kb note`. Do NOT implement yet. When the plan is clear, `kb advance` to in-progress."
@@ -251,13 +250,26 @@
    "testing"     "Write and run tests covering the changes. Verify edge cases, integration, and regression. If tests fail, fix issues and re-run. When all tests pass, `kb advance`."
    "done"         "This card is complete. No further action needed."})
 
+(defn- load-lane-md
+  "Load lane instructions from a markdown file at <kanban-root>/lanes/<lane-name>.md.
+   Returns the file content as a string, or nil if the file doesn't exist."
+  [board lane-name]
+  (let [md-path (u/path-resolve (:root board) "lanes" (str lane-name ".md"))]
+    (when (u/path-exists? md-path)
+      (str/trim (slurp (str md-path))))))
+
 (defn lane-instructions
-  "Return the instructions string for a lane. Checks the lane config for
-   an `instructions` key first, then falls back to default-lane-instructions."
+  "Return the instructions string for a lane. Priority order:
+   1. Markdown file at .kanban/lanes/<lane-name>.md
+   2. `instructions` key in the lane config (board.yaml)
+   3. Default-lane-instructions map
+   4. Generic fallback string"
   [board lane-name]
   (let [lane-conf  (lane-by-name board lane-name)
-        custom-ins (and lane-conf (get lane-conf "instructions"))]
-    (or custom-ins
+        custom-ins (and lane-conf (get lane-conf "instructions"))
+        md-ins     (load-lane-md board lane-name)]
+    (or md-ins
+        custom-ins
         (get default-lane-instructions lane-name)
         (str "Work on this card in lane '" lane-name "'. Use `kb advance` when ready to move forward."))))
 
@@ -1550,8 +1562,13 @@
                          (str "Worktree: " (:worktree card))
                          (str "Base branch: " base)
                          ""]
-                        (into [(str "## Lane: " (:lane card))
-                               (lane-instructions board (:lane card)) ""])
+                        (into (let [md-ins (load-lane-md board (:lane card))]
+                                (if md-ins
+                                  ;; Full markdown file — it has its own heading
+                                  ["" md-ins ""]
+                                  ;; Fallback: short instruction string with a header
+                                  [(str "## Lane: " (:lane card))
+                                   (lane-instructions board (:lane card)) ""])))
                         (into (when (not (str/blank? desc))
                                  ["## Description" "" (str/trim desc) ""]))
                       (into gates-output)
