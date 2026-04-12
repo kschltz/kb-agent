@@ -90,3 +90,15 @@ export interface GateInfo {
   target_lane: string;
   description: string | null;
 }
+
+export interface ActivityEntry {
+  ts: number;
+  role: 'system' | 'human' | 'agent';
+  action: string;
+  content: string;
+  agent_id?: string;
+  gate?: string;
+  card_id: string;
+  card_title: string;
+  card_lane: string;
+}

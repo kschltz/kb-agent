@@ -673,6 +673,27 @@
   [board card-id]
   (diff-internal board card-id ["--stat"]))
 
+(defn get-activity
+  "Return merged, reverse-chronological activity feed across all cards.
+   Options: :since (epoch double), :action (string filter), :limit (int, default 200)
+   Returns seq of snake_case JSON-serializable maps."
+  [board & {:keys [since action limit] :or {limit 200}}]
+  (let [cards (all-cards board)]
+    (->> cards
+         (mapcat (fn [card]
+                   (->> (load-history board (:id card))
+                        (map (fn [entry]
+                               (assoc (history-entry->json-map entry)
+                                      "card_id"    (:id card)
+                                      "card_title" (:title card)
+                                      "card_lane"  (:lane card)))))))
+         (filter (fn [e]
+                   (and (or (nil? since) (> (get e "ts") since))
+                        (or (nil? action) (= (get e "action") action)))))
+         (sort-by #(get % "ts") #(compare %2 %1))
+         (take limit)
+         vec)))
+
 ;; ── Board operations ──────────────────────────────────────────
 
 (defn create-card!

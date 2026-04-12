@@ -273,6 +273,24 @@
          :headers {"Content-Type" "application/json"}
          :body    (json/generate-string (get-board-state kanban-root))}
 
+        ;; REST: GET /api/activity
+        (= uri "/api/activity")
+        (let [params  (:query-string req)
+              qmap    (when params
+                        (into {} (map (fn [kv]
+                                        (let [[k v] (str/split kv #"=" 2)]
+                                          [k v]))
+                                      (str/split params #"&"))))
+              since   (when-let [s (get qmap "since")] (try (Double/parseDouble s) (catch Exception _ nil)))
+              action  (get qmap "action")
+              limit   (when-let [l (get qmap "limit")] (try (Integer/parseInt l) (catch Exception _ 200)))
+              b       (board/make-board kanban-root)
+              entries (board/get-activity b :since since :action action :limit (or limit 200))]
+          {:status  200
+           :headers {"Content-Type" "application/json"
+                     "Access-Control-Allow-Origin" "*"}
+           :body    (json/generate-string {:entries entries})})
+
         ;; REST: GET /api/cards/:id/diff
         (and (str/starts-with? uri "/api/cards/")
              (str/ends-with? uri "/diff"))

@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useBoard } from './hooks/useBoard';
 import { Header } from './components/Header';
 import { Board } from './components/Board';
 import { CardDetail } from './components/CardDetail';
 import { AddCardDialog } from './components/AddCardDialog';
 import { ActivityBar } from './components/ActivityBar';
+import { ActivityFeed } from './components/ActivityFeed';
 import { ToastContainer } from './components/Toast';
 import type { CardData } from './types';
 import './index.css';
@@ -19,10 +20,15 @@ function findCardById(board: { lanes: { cards: CardData[] }[] } | null, cardId: 
   return null;
 }
 
+type TabId = 'board' | 'activity';
+
 export default function App() {
   const { board, connected, send, lastResult } = useBoard();
   const [selectedCard, setSelectedCard] = useState<CardData | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabId>('board');
+  const [activityTick, setActivityTick] = useState(0);
+  const prevBoardRef = useRef<typeof board>(null);
   const [zoom, setZoom] = useState<number>(() => {
     const stored = localStorage.getItem('kb-zoom');
     const parsed = stored ? parseFloat(stored) : 1;
@@ -41,6 +47,14 @@ export default function App() {
     if (fresh) setSelectedCard(fresh);
   }, [board, selectedCard]);
 
+  // Bump activity tick on board change to trigger feed refresh
+  useEffect(() => {
+    if (board && board !== prevBoardRef.current) {
+      prevBoardRef.current = board;
+      setActivityTick(t => t + 1);
+    }
+  }, [board]);
+
   const laneNames = board?.lanes.map(l => l.name) ?? [];
 
   const handleActivityCardClick = (cardId: string) => {
@@ -52,18 +66,47 @@ export default function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', zoom }}>
       <Header board={board} connected={connected} onAddCard={() => setAddDialogOpen(true)} zoom={zoom} onZoomChange={handleZoomChange} />
 
-      {board && !board.error ? (
-        <Board board={board} onCardClick={setSelectedCard} send={send} />
-      ) : (
-        <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-2)',
-        }}>
-          {board?.error || 'connecting...'}
-        </div>
-      )}
+      {/* Tab bar */}
+      <div style={{
+        display: 'flex', gap: 0, background: 'var(--bg-1)',
+        borderBottom: '1px solid var(--border)', flexShrink: 0,
+      }}>
+        {(['board', 'activity'] as TabId[]).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              fontFamily: 'var(--mono)', fontSize: 10, padding: '6px 16px',
+              border: 'none', cursor: 'pointer',
+              background: activeTab === tab ? 'var(--bg-0)' : 'transparent',
+              color: activeTab === tab ? 'var(--accent)' : 'var(--text-2)',
+              borderBottom: activeTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
+              textTransform: 'uppercase', letterSpacing: 1,
+            }}
+          >{tab}</button>
+        ))}
+      </div>
 
-      <ActivityBar board={board} onCardClick={handleActivityCardClick} />
+      {/* Main content area */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {activeTab === 'board' && (
+          board && !board.error ? (
+            <Board board={board} onCardClick={setSelectedCard} send={send} />
+          ) : (
+            <div style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-2)',
+            }}>
+              {board?.error || 'connecting...'}
+            </div>
+          )
+        )}
+        {activeTab === 'activity' && (
+          <ActivityFeed refreshTick={activityTick} />
+        )}
+      </div>
+
+      {activeTab === 'board' && <ActivityBar board={board} onCardClick={handleActivityCardClick} />}
 
       <CardDetail card={selectedCard} laneNames={laneNames} onClose={() => setSelectedCard(null)} send={send} />
       <AddCardDialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} send={send} />
