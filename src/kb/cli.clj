@@ -24,10 +24,15 @@
   (println (json/generate-string data {:pretty true})))
 
 (defn- ->card-id
-  "Coerce card-id opt to string (babashka.cli may parse '001' as Long)."
+  "Coerce card-id opt to string. Babashka.cli used to parse '010' as
+   octal 8; with :coerce :string this is now preserved. We still handle
+   the integer case for programmatic calls."
   [opts]
   (let [v (:card-id opts)]
-    (when v (if (integer? v) (format "%03d" v) (str v)))))
+    (when v
+      (cond
+        (integer? v) (format "%03d" v)
+        :else         (str v)))))
 
 ;; ── Spawn helper ──────────────────────────────────────────────
 
@@ -850,7 +855,7 @@
 
 (defn -main [& args]
   (try
-    (cli/dispatch dispatch-table args {})
+    (cli/dispatch dispatch-table args {:coerce {:card-id :string :dep-id :string :lane :string}})
     (catch Exception e
       (binding [*out* *err*]
         (println (str "Error: " (.getMessage e))))

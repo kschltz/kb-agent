@@ -208,6 +208,13 @@ body::before {
   letter-spacing: 1.2px;
   color: var(--text-1);
 }
+.lane-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 14px 8px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
 .lane-meta {
   display: flex;
   align-items: center;
@@ -228,6 +235,55 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.lane-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+.lane-btn {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.lane:hover .lane-btn {
+  opacity: 1;
+}
+.lane-btn:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+.add-lane-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  background: var(--bg-2);
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-width: 220px;
+}
+.add-lane-btn:hover {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+  background: var(--bg-3);
+}
+.lane.drag-over-lane {
+  border-left: 3px solid var(--accent);
 }
 .lane-body::-webkit-scrollbar { width: 4px; }
 .lane-body::-webkit-scrollbar-track { background: transparent; }
@@ -820,6 +876,39 @@ body::before {
   </div>
 </div>
 
+<!-- Add lane modal -->
+<div class="modal-bg" id="add-lane-modal">
+  <div class="modal">
+    <h3>Add lane</h3>
+    <label>Name</label>
+    <input type="text" id="add-lane-name" placeholder="Lane name">
+    <label>WIP limit (optional)</label>
+    <input type="number" id="add-lane-wip" placeholder="e.g. 3" min="1">
+    <label>Max parallelism (optional)</label>
+    <input type="number" id="add-lane-par" placeholder="e.g. 2" min="1">
+    <label>Instructions (optional)</label>
+    <input type="text" id="add-lane-instructions" placeholder="e.g. Research the problem, do not implement yet">
+    <div class="modal-actions">
+      <button class="btn" id="add-lane-cancel">Cancel</button>
+      <button class="btn btn-accent" id="add-lane-submit">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rename lane modal -->
+<div class="modal-bg" id="rename-lane-modal">
+  <div class="modal">
+    <h3>Rename lane</h3>
+    <label>New name</label>
+    <input type="text" id="rename-lane-name" placeholder="New lane name">
+    <input type="hidden" id="rename-lane-old">
+    <div class="modal-actions">
+      <button class="btn" id="rename-lane-cancel">Cancel</button>
+      <button class="btn btn-accent" id="rename-lane-submit">Rename</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div class="toast-container" id="toasts"></div>
 
@@ -829,6 +918,7 @@ let boardState = null;
 let ws = null;
 let selectedCard = null;
 let dragCard = null;
+let dragLane = null;
 let reconnectTimer = null;
 
 // ── WebSocket ─────────────────────────────────────────────────
@@ -918,14 +1008,70 @@ function render() {
     const count = lane.cards.length;
 
     laneEl.innerHTML = `
-      <div class="lane-header">
+      <div class="lane-header" draggable="true">
         <span class="lane-title">${esc(lane.name)}</span>
         <div class="lane-meta">
           <span class="lane-count">${count}/${maxWip}</span>
           ${lane.max_parallelism ? `<span title="Max parallelism">⊞${maxPar}</span>` : ''}
+          <div class="lane-actions">
+            <button class="lane-btn" title="Rename lane" data-rename="${esc(lane.name)}">✎</button>
+            <button class="lane-btn" title="Delete lane" data-delete="${esc(lane.name)}">✕</button>
+          </div>
         </div>
       </div>
+      ${lane.instructions ? `<div class="lane-hint">${esc(lane.instructions)}</div>` : ''}
     `;
+
+    // Lane header drag for reorder
+    const header = laneEl.querySelector('.lane-header');
+    header.addEventListener('dragstart', (e) => {
+      dragLane = lane.name;
+      e.dataTransfer.effectAllowed = 'move';
+      header.classList.add('dragging');
+    });
+    header.addEventListener('dragend', () => {
+      header.classList.remove('dragging');
+      dragLane = null;
+      document.querySelectorAll('.drag-over-lane').forEach(x => x.classList.remove('drag-over-lane'));
+    });
+    laneEl.addEventListener('dragover', (e) => {
+      if (dragLane) { e.preventDefault(); laneEl.classList.add('drag-over-lane'); }
+    });
+    laneEl.addEventListener('dragleave', () => laneEl.classList.remove('drag-over-lane'));
+    laneEl.addEventListener('drop', (e) => {
+      e.preventDefault();
+      laneEl.classList.remove('drag-over-lane');
+      if (dragLane && dragLane !== lane.name) {
+        // Reorder: move dragLane before this lane
+        const currentOrder = boardState.lanes.map(l => l.name);
+        const fromIdx = currentOrder.indexOf(dragLane);
+        const toIdx = currentOrder.indexOf(lane.name);
+        if (fromIdx >= 0 && toIdx >= 0) {
+          const newOrder = [...currentOrder];
+          newOrder.splice(fromIdx, 1);
+          newOrder.splice(toIdx, 0, dragLane);
+          send({ action: 'reorder_lanes', order: newOrder });
+        }
+      }
+      dragLane = null;
+    });
+
+    // Lane action buttons
+    laneEl.querySelector('[data-rename]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('rename-lane-old').value = lane.name;
+      document.getElementById('rename-lane-name').value = lane.name;
+      document.getElementById('rename-lane-modal').classList.add('open');
+      setTimeout(() => document.getElementById('rename-lane-name').focus(), 50);
+    });
+    laneEl.querySelector('[data-delete]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const cardCount = lane.cards.length;
+      const firstLane = boardState.lanes[0].name;
+      if (confirm(`Delete lane "${lane.name}"? ${cardCount > 0 ? cardCount + ' card(s) will move to "' + firstLane + '".' : ''}`)) {
+        send({ action: 'remove_lane', lane: lane.name, move_to: firstLane });
+      }
+    });
 
     const body = document.createElement('div');
     body.className = 'lane-body';
@@ -960,6 +1106,20 @@ function render() {
     laneEl.appendChild(body);
     board.appendChild(laneEl);
   }
+
+  // Add lane button
+  const addLaneBtn = document.createElement('button');
+  addLaneBtn.className = 'add-lane-btn';
+  addLaneBtn.textContent = '+ Add lane';
+  addLaneBtn.addEventListener('click', () => {
+    document.getElementById('add-lane-name').value = '';
+    document.getElementById('add-lane-wip').value = '';
+    document.getElementById('add-lane-par').value = '';
+    document.getElementById('add-lane-instructions').value = '';
+    document.getElementById('add-lane-modal').classList.add('open');
+    setTimeout(() => document.getElementById('add-lane-name').focus(), 50);
+  });
+  board.appendChild(addLaneBtn);
 
   // show last activity
   allEvents.sort((a, b) => b.ts - a.ts);
@@ -1360,6 +1520,52 @@ document.getElementById('add-title').addEventListener('keydown', (e) => {
 document.getElementById('add-modal').addEventListener('click', (e) => {
   if (e.target === document.getElementById('add-modal')) {
     document.getElementById('add-modal').classList.remove('open');
+  }
+});
+
+// ── Add lane modal ──────────────────────────────────────────
+document.getElementById('add-lane-cancel').onclick = () => {
+  document.getElementById('add-lane-modal').classList.remove('open');
+};
+document.getElementById('add-lane-submit').onclick = () => {
+  const name = document.getElementById('add-lane-name').value.trim();
+  if (!name) return;
+  const wip = document.getElementById('add-lane-wip').value;
+  const par = document.getElementById('add-lane-par').value;
+  const ins = document.getElementById('add-lane-instructions').value.trim();
+  const cmd = { action: 'add_lane', lane: name };
+  if (wip) cmd.wip = parseInt(wip);
+  if (par) cmd.parallelism = parseInt(par);
+  if (ins) cmd.instructions = ins;
+  send(cmd);
+  document.getElementById('add-lane-modal').classList.remove('open');
+};
+document.getElementById('add-lane-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('add-lane-submit').click();
+});
+document.getElementById('add-lane-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('add-lane-modal')) {
+    document.getElementById('add-lane-modal').classList.remove('open');
+  }
+});
+
+// ── Rename lane modal ────────────────────────────────────────
+document.getElementById('rename-lane-cancel').onclick = () => {
+  document.getElementById('rename-lane-modal').classList.remove('open');
+};
+document.getElementById('rename-lane-submit').onclick = () => {
+  const oldName = document.getElementById('rename-lane-old').value;
+  const newName = document.getElementById('rename-lane-name').value.trim();
+  if (!newName) return;
+  send({ action: 'rename_lane', old_name: oldName, new_name: newName });
+  document.getElementById('rename-lane-modal').classList.remove('open');
+};
+document.getElementById('rename-lane-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('rename-lane-submit').click();
+});
+document.getElementById('rename-lane-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('rename-lane-modal')) {
+    document.getElementById('rename-lane-modal').classList.remove('open');
   }
 });
 

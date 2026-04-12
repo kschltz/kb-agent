@@ -114,20 +114,35 @@ agent_command: "claude --system-prompt \"$(kb context {card_id})\" --cwd {worktr
 
 lanes:
   - name: backlog
+    instructions: "Waiting to be picked up. Do not start work yet."
 
   - name: in-progress
     max_wip: 5
     max_parallelism: 2
+    instructions: "Implement the solution. Write code, make changes, iterate."
 
   - name: review
     max_wip: 3
     gate_from_in-progress:
       - "cd $KB_WORKTREE && npm test"
+    instructions: "Review changes for correctness and style."
 
   - name: done
     gate_from_review:
       - "cd $KB_WORKTREE && npm run lint"
     on_enter: merge
+```
+
+### Lane Instructions
+
+Each lane can include an `instructions` field that tells agents what work is expected in that lane. `kb context` includes a `## Lane:` section with the applicable instructions, so agents know what to do before advancing.
+
+Common lane names (`backlog`, `discovery`, `plan`, `in-progress`, `unit-tests`, `review`, `testing`, `done`) have sensible defaults. Add `instructions` to a lane in `board.yaml` to override:
+
+```yaml
+lanes:
+  - name: discovery
+    instructions: "Research the problem. Do NOT implement. Log findings with kb note."
 ```
 
 ### Gate Environment Variables
@@ -154,6 +169,8 @@ Auto-opens the browser. Serves a live board view at `http://localhost:8741` with
 - Card detail panel with conversation history and diff viewer
 - Real-time updates via WebSocket
 - Add cards, notes, block/unblock from the browser
+- Lane management: add, rename, reorder (drag), and delete lanes
+- Lane instructions displayed under each lane header
 
 ## How It Works
 
@@ -172,7 +189,7 @@ Auto-opens the browser. Serves a live board view at `http://localhost:8741` with
   board.yaml              # Lane definitions, gates, WIP limits
   cards/
     001-fix-auth-bug/
-      meta.yaml           # Card state: lane, priority, blocked, agent
+      meta.yaml           # Card state: lane, priority, blocked, agent, dependencies
       history.jsonl        # Structured conversation log
       description.md      # Card description / acceptance criteria (optional)
   worktrees/

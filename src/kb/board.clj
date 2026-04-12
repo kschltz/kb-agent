@@ -8,7 +8,7 @@
   (:import [java.nio.file Path]))
 
 ;; Forward declaration (move! defined after pull!)
-(declare move! deps-satisfied?)
+(declare move! deps-satisfied? all-cards find-card-dir! save-card! append-history! lane-by-name)
 
 ;; ── Key translation helpers ───────────────────────────────────
 ;;
@@ -237,6 +237,30 @@
 (defn lanes [board]
   (get (:config board) "lanes" []))
 
+;; ── Lane instructions ─────────────────────────────────────────
+
+(def default-lane-instructions
+  "Default instructions for common lane names. Users can override per-lane
+   by adding an `instructions` key to the lane config in board.yaml."
+  {"backlog"     "This card is waiting to be picked up. Do not start work yet — use `kb advance` when ready."
+   "discovery"   "Research and understand the problem. Read the codebase, identify affected files, understand constraints. Do NOT implement yet — produce findings only. Log your discoveries with `kb note`. When you understand the problem fully, `kb advance` to plan."
+   "plan"         "Design your approach. Break the task into concrete steps, identify files to create or modify, consider edge cases. Write your plan as a `kb note`. Do NOT implement yet. When the plan is clear, `kb advance` to in-progress."
+   "in-progress"  "Implement the solution. Write code, make changes, iterate. Log progress with `kb note`. Run relevant tests. When implementation is complete and tests pass, `kb advance` to unit-tests."
+   "unit-tests"   "Write and run tests covering the changes. Verify edge cases, integration, and regression. If tests fail, fix issues and re-run. When all tests pass, `kb advance` to done."
+   "review"       "Review the implementation for correctness, style, and completeness. Check edge cases. If issues found, `kb note` them and fix. If clean, `kb advance`."
+   "testing"     "Write and run tests covering the changes. Verify edge cases, integration, and regression. If tests fail, fix issues and re-run. When all tests pass, `kb advance`."
+   "done"         "This card is complete. No further action needed."})
+
+(defn lane-instructions
+  "Return the instructions string for a lane. Checks the lane config for
+   an `instructions` key first, then falls back to default-lane-instructions."
+  [board lane-name]
+  (let [lane-conf  (lane-by-name board lane-name)
+        custom-ins (and lane-conf (get lane-conf "instructions"))]
+    (or custom-ins
+        (get default-lane-instructions lane-name)
+        (str "Work on this card in lane '" lane-name "'. Use `kb advance` when ready to move forward."))))
+
 (defn lane-by-name
   "Return the lane config map for `name`, or nil."
   [board name]
@@ -261,6 +285,89 @@
   "Return configured merge_strategy (default: \"squash\")."
   [board]
   (get (:config board) "merge_strategy" "squash"))
+
+(defn save-config!
+  "Save the board config back to board.yaml. Returns the updated config map."
+  [board]
+  (let [config-path (u/path-resolve (:root board) u/board-file)]
+    (u/spit-yaml config-path (:config board))
+    (:config board)))
+
+(defn add-lane!
+  "Add a new lane to the board. Options: :wip, :parallelism, :on-enter, :instructions.
+   Returns the updated board."
+  [board lane-name & {:keys [wip parallelism on-enter instructions]}]
+  (when (some #{lane-name} (lane-names board))
+    (throw (ex-info (str "Lane '" lane-name "' already exists.") {:lane lane-name})))
+  (let [lane-conf (cond-> {"name" lane-name}
+                    wip          (assoc "max_wip" wip)
+                    parallelism (assoc "max_parallelism" parallelism)
+                    on-enter    (assoc "on_enter" on-enter)
+                    instructions (assoc "instructions" instructions))
+        new-config (update (:config board) "lanes" conj lane-conf)]
+    (assoc board :config (save-config! (assoc board :config new-config)))))
+
+(defn rename-lane!
+  "Rename a lane. Updates both the config and all cards in that lane.
+   Returns the updated board."
+  [board old-name new-name]
+  (when-not (some #{old-name} (lane-names board))
+    (throw (ex-info (str "Lane '" old-name "' not found.") {:lane old-name})))
+  (when (some #{new-name} (lane-names board))
+    (throw (ex-info (str "Lane '" new-name "' already exists.") {:lane new-name})))
+  (let [new-config (update (:config board) "lanes"
+                            (fn [lanes]
+                              (mapv (fn [lane]
+                                      (if (= (get lane "name") old-name)
+                                        (assoc lane "name" new-name)
+                                        lane))
+                                    lanes)))]
+    ;; Update all cards in the old lane
+    (doseq [card (filter #(= (:lane %) old-name) (all-cards board))]
+      (let [d       (find-card-dir! board (:id card))
+            updated (assoc card :lane new-name)]
+        (save-card! board updated d)))
+    (assoc board :config (save-config! (assoc board :config new-config)))))
+
+(defn remove-lane!
+  "Remove a lane from the board. Moves orphaned cards to the target lane.
+   Returns the updated board."
+  [board lane-name & {:keys [move-to]}]
+  (when-not (some #{lane-name} (lane-names board))
+    (throw (ex-info (str "Lane '" lane-name "' not found.") {:lane lane-name})))
+  (when (= lane-name (first-lane board))
+    (throw (ex-info "Cannot remove the first lane." {:lane lane-name})))
+  (let [target-lane (or move-to (first-lane board))
+        new-config  (update (:config board) "lanes"
+                            (fn [lanes]
+                              (vec (remove #(= (get % "name") lane-name) lanes))))]
+    ;; Move orphaned cards to target lane
+    (doseq [card (filter #(= (:lane %) lane-name) (all-cards board))]
+      (let [d       (find-card-dir! board (:id card))
+            updated (assoc card :lane target-lane)]
+        (save-card! board updated d)
+        (append-history! board (:id card)
+                         {:ts (u/now-epoch)
+                          :role "system"
+                          :action "moved"
+                          :content (str "Moved from '" lane-name "' to '" target-lane "' (lane removed)")})))
+    (assoc board :config (save-config! (assoc board :config new-config)))))
+
+(defn reorder-lanes!
+  "Reorder lanes to match the given ordered sequence of lane names.
+   Returns the updated board."
+  [board ordered-names]
+  (let [current-names (set (lane-names board))]
+    (doseq [n ordered-names]
+      (when-not (contains? current-names n)
+        (throw (ex-info (str "Lane '" n "' not found.") {:lane n}))))
+    (when-not (= (count ordered-names) (count current-names))
+      (throw (ex-info "Must provide all lane names in reorder." {:given (count ordered-names)
+                                                                    :expected (count current-names)})))
+    (let [name->conf  (into {} (map #(vector (get % "name") %) (lanes board)))
+          new-lanes   (mapv #(get name->conf %) ordered-names)
+          new-config  (assoc (:config board) "lanes" new-lanes)]
+      (assoc board :config (save-config! (assoc board :config new-config))))))
 
 ;; ── Card directory helpers ─────────────────────────────────────
 
@@ -1443,6 +1550,8 @@
                          (str "Worktree: " (:worktree card))
                          (str "Base branch: " base)
                          ""]
+                        (into [(str "## Lane: " (:lane card))
+                               (lane-instructions board (:lane card)) ""])
                         (into (when (not (str/blank? desc))
                                  ["## Description" "" (str/trim desc) ""]))
                       (into gates-output)
