@@ -66,6 +66,7 @@ export function Card({ card, onClick }: CardProps) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {card.assigned_agent && <Badge color="accent">● {card.assigned_agent}</Badge>}
+        {card.reviewer && <Badge color="purple" truncate>R: {card.reviewer}</Badge>}
         {card.blocked && <Badge color="danger">⊘ blocked</Badge>}
         {card.pending_approval && <Badge color="amber">⏳ approval</Badge>}
         {card.pending_question && <Badge color="amber">❓ question</Badge>}

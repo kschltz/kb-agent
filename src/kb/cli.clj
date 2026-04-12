@@ -445,6 +445,7 @@
                               (:pending-approval c) (conj "PENDING APPROVAL")
                               (and (:pending-question c) (not (str/blank? (:pending-question c)))) (conj "QUESTION")
                               (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
+                              (not (str/blank? (:reviewer c ""))) (conj (str "R: " (:reviewer c)))
                               (not (str/blank? (:branch c ""))) (conj (:branch c))
                               (and (:confidence c) (:display conf-cfg)) (conj (str "C:" (int (:confidence c)) "%"))
                               (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c))))
@@ -802,6 +803,20 @@
       (catch Exception e
         (fail! (.getMessage e))))))
 
+(defn cmd-assign-reviewer
+  [{:keys [opts]}]
+  (let [card-id  (->card-id opts)
+        reviewer (or (:reviewer opts) "")
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)]
+    (try
+      (let [card (b/assign-reviewer! board card-id reviewer)]
+        (if (:json opts)
+          (out-json card)
+          (println (str "Reviewer set to '" reviewer "' for card " card-id))))
+      (catch Exception e
+        (fail! (.getMessage e))))))
+
 (defn cmd-watch
   "Watch the board for stale heartbeats and expired approvals.
    Runs a polling loop at the configured interval (default 60s)."
@@ -957,6 +972,7 @@
     :opts {:doing    {:desc "Current activity description" :type :string}
            :progress {:desc "Progress as 0.0-1.0 fraction" :type :number}
            :agent    {:desc "Agent ID" :type :string}}}
+   {:cmds ["assign-reviewer"] :fn cmd-assign-reviewer :args->opts [:card-id :reviewer]}
    {:cmds ["watch"] :fn cmd-watch}
    {:cmds ["status"] :fn cmd-status}
    {:cmds ["context"] :fn cmd-context :args->opts [:card-id]

@@ -42,7 +42,7 @@
                            pending-approval approved-by
                            pending-question last-heartbeat
                            last-heartbeat-doing last-heartbeat-progress
-                           depends-on confidence]
+                           depends-on confidence reviewer]
                     :or {priority 0 blocked false blocked-reason ""
                          assigned-agent "" branch "" worktree ""
                          pending-approval false approved-by ""
@@ -51,6 +51,7 @@
                          last-heartbeat-doing nil
                          last-heartbeat-progress nil
                          confidence nil
+                         reviewer ""
                          tags [] depends-on []}}]
   (let [now (u/now-epoch)]
     {:id                       id
@@ -60,6 +61,7 @@
      :blocked                  blocked
      :blocked-reason           blocked-reason
      :assigned-agent           assigned-agent
+     :reviewer                 reviewer
      :branch                   branch
      :worktree                 worktree
      :created-at               (or created-at now)
@@ -97,7 +99,8 @@
      :last-heartbeat-doing     (not-empty (str (:last-heartbeat-doing d "")))
      :last-heartbeat-progress  (when-let [p (:last-heartbeat-progress d)] (double p))
      :depends-on               (vec (or (:depends-on d) []))
-     :confidence               (when (:confidence d) (double (:confidence d)))}))
+     :confidence               (when (:confidence d) (double (:confidence d)))
+     :reviewer                 (str (:reviewer d ""))}))
 
 (defn- card->yaml-map
   "Convert a card map to snake_case keys for YAML serialization."
@@ -122,7 +125,8 @@
       (:last-heartbeat-doing card)    (assoc "last_heartbeat_doing"    (:last-heartbeat-doing card))
       (:last-heartbeat-progress card) (assoc "last_heartbeat_progress" (:last-heartbeat-progress card))
       (seq (:depends-on card))        (assoc "depends_on"              (vec (:depends-on card)))
-      (:confidence card)              (assoc "confidence"              (:confidence card)))))
+      (:confidence card)              (assoc "confidence"              (:confidence card))
+      (not (str/blank? (:reviewer card ""))) (assoc "reviewer"         (:reviewer card)))))
 
 ;; ── HistoryEntry shape ────────────────────────────────────────
 ;;
@@ -1003,8 +1007,15 @@
                         [false (str "Merge failed: " e) gate-results]))
                     ;; No merge needed — just move
                     (do
-                      (let [card2 (assoc card :lane target-lane :assigned-agent "" :confidence confidence)]
-                        (save-card! board card2))
+                      (let [review-lane? (= (get target-config "role") "review")
+                            card2 (cond-> (assoc card :lane target-lane :assigned-agent "" :confidence confidence)
+                                    review-lane? (assoc :reviewer ""))]
+                        (save-card! board card2)
+                        (when review-lane?
+                          (append-history! board card-id
+                                           (make-history-entry "system" "reviewer_assigned"
+                                                               :content "Moved to review lane; reviewer cleared for reassignment"
+                                                               :agent-id agent))))
                       (append-history! board card-id
                                        (make-history-entry "system" "moved"
                                                            :content (str "Moved from '" source-lane "' to '" target-lane "'")
@@ -1079,6 +1090,20 @@
                                            :agent-id agent))
       (run-hooks! board "approval_rejected" updated :reason reject-reason :agent agent)
       updated)))
+
+(defn assign-reviewer!
+  "Set the reviewer field on a card. Pass nil or \"\" to clear."
+  [board card-id reviewer]
+  (let [card    (load-card board card-id)
+        r       (or reviewer "")
+        updated (assoc card :reviewer r)]
+    (save-card! board updated)
+    (append-history! board card-id
+                     (make-history-entry "system" "reviewer_assigned"
+                                         :content (if (str/blank? r)
+                                                    "Reviewer cleared"
+                                                    (str "Reviewer set to: " r))))
+    updated))
 
 (defn block!
   "Block a card with a reason."
@@ -1616,14 +1641,18 @@
                                      (str "BLOCKED — " (count usdeps) " unsatisfied dependenc"
                                            (if (= 1 (count usdeps)) "y" "ies"))
                                      "UNBLOCKED — all dependencies satisfied")]
-                    (-> [(str "# Task: " (:title card))
-                         (str "Card ID: " (:id card))
-                         (str "Lane: " (:lane card))
-                         (str "Status: " dep-status)
-                         (str "Branch: " (:branch card))
-                         (str "Worktree: " (:worktree card))
-                         (str "Base branch: " base)
-                         ""]
+                    (-> (cond-> [(str "# Task: " (:title card))
+                                (str "Card ID: " (:id card))
+                                (str "Lane: " (:lane card))
+                                (str "Status: " dep-status)
+                                (str "Assignee: " (if (str/blank? (:assigned-agent card "")) "(none)" (:assigned-agent card)))
+                                (str "Branch: " (:branch card))
+                                (str "Worktree: " (:worktree card))
+                                (str "Base branch: " base)]
+                          (not (str/blank? (:reviewer card "")))
+                          (conj (str "Reviewer: " (:reviewer card))))
+                        (conj "")
+                        vec
                         (into (let [lane    (:lane card)
                                     md-ins  (load-lane-md board lane)]
                                 (if md-ins
