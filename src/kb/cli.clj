@@ -447,7 +447,11 @@
                               (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
                               (not (str/blank? (:branch c ""))) (conj (:branch c))
                               (and (:confidence c) (:display conf-cfg)) (conj (str "C:" (int (:confidence c)) "%"))
-                              (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c)))))
+                              (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c))))
+                              (not (str/blank? (:last-heartbeat-doing c "")))
+                              (conj (str "doing: " (:last-heartbeat-doing c)
+                                         (when (:last-heartbeat-progress c)
+                                           (str " " (int (* 100 (:last-heartbeat-progress c))) "%")))))
                       flag-str (if (seq flags)
                                  (str "  (" (str/join ", " flags) ")")
                                  "")]
@@ -785,7 +789,13 @@
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)]
     (try
-      (let [card (b/heartbeat! board card-id :agent (or (:agent opts) ""))]
+      (let [progress (when-let [p (:progress opts)]
+                       (let [v (if (number? p) (double p) (Double/parseDouble (str p)))]
+                         (min 1.0 (max 0.0 v))))
+            card (b/heartbeat! board card-id
+                               :agent (or (:agent opts) "")
+                               :doing (:doing opts)
+                               :progress progress)]
         (if (:json opts)
           (out-json card)
           (println (str "Heartbeat recorded for card " card-id))))
@@ -943,7 +953,10 @@
    {:cmds ["show"] :fn cmd-show :args->opts [:card-id]}
    {:cmds ["gates"] :fn cmd-gates :args->opts [:card-id]}
    {:cmds ["edit"] :fn cmd-edit :args->opts [:card-id]}
-   {:cmds ["heartbeat"] :fn cmd-heartbeat :args->opts [:card-id]}
+   {:cmds ["heartbeat"] :fn cmd-heartbeat :args->opts [:card-id]
+    :opts {:doing    {:desc "Current activity description" :type :string}
+           :progress {:desc "Progress as 0.0-1.0 fraction" :type :number}
+           :agent    {:desc "Agent ID" :type :string}}}
    {:cmds ["watch"] :fn cmd-watch}
    {:cmds ["status"] :fn cmd-status}
    {:cmds ["context"] :fn cmd-context :args->opts [:card-id]

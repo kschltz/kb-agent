@@ -75,6 +75,12 @@ export function Card({ card, onClick }: CardProps) {
         {hb === 'fresh' && <Badge color="accent">💚 alive</Badge>}
         {hb === 'stale' && <Badge color="amber">⚠️ stale</Badge>}
         {hb === 'dead' && <Badge color="danger">💤 no signal</Badge>}
+        {card.last_heartbeat_doing && (
+          <Badge color="blue" truncate>
+            {card.last_heartbeat_doing}
+            {card.last_heartbeat_progress != null && ` ${Math.round(card.last_heartbeat_progress * 100)}%`}
+          </Badge>
+        )}
       </div>
     </div>
   );

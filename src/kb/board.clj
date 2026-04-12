@@ -41,33 +41,38 @@
                            branch worktree created-at updated-at tags
                            pending-approval approved-by
                            pending-question last-heartbeat
+                           last-heartbeat-doing last-heartbeat-progress
                            depends-on confidence]
                     :or {priority 0 blocked false blocked-reason ""
                          assigned-agent "" branch "" worktree ""
                          pending-approval false approved-by ""
                          pending-question nil
                          last-heartbeat nil
+                         last-heartbeat-doing nil
+                         last-heartbeat-progress nil
                          confidence nil
                          tags [] depends-on []}}]
   (let [now (u/now-epoch)]
-    {:id               id
-     :title            title
-     :lane             lane
-     :priority         priority
-     :blocked          blocked
-     :blocked-reason   blocked-reason
-     :assigned-agent   assigned-agent
-     :branch           branch
-     :worktree         worktree
-     :created-at       (or created-at now)
-     :updated-at       (or updated-at now)
-     :tags             tags
-     :pending-approval pending-approval
-     :approved-by      approved-by
-     :pending-question (or pending-question "")
-     :last-heartbeat   last-heartbeat
-     :depends-on       depends-on
-     :confidence       confidence}))
+    {:id                       id
+     :title                    title
+     :lane                     lane
+     :priority                 priority
+     :blocked                  blocked
+     :blocked-reason           blocked-reason
+     :assigned-agent           assigned-agent
+     :branch                   branch
+     :worktree                 worktree
+     :created-at               (or created-at now)
+     :updated-at               (or updated-at now)
+     :tags                     tags
+     :pending-approval         pending-approval
+     :approved-by              approved-by
+     :pending-question         (or pending-question "")
+     :last-heartbeat           last-heartbeat
+     :last-heartbeat-doing     last-heartbeat-doing
+     :last-heartbeat-progress  last-heartbeat-progress
+     :depends-on               depends-on
+     :confidence               confidence}))
 
 (defn- card-from-yaml
   "Convert a YAML map (with snake_case keys as keywords or strings) to a card map."
@@ -88,9 +93,11 @@
      :pending-approval (boolean (:pending-approval d))
      :approved-by      (str (:approved-by d ""))
      :pending-question (or (:pending-question d) "")
-     :last-heartbeat   (when (:last-heartbeat d) (double (:last-heartbeat d)))
-     :depends-on       (vec (or (:depends-on d) []))
-     :confidence       (when (:confidence d) (double (:confidence d)))}))
+     :last-heartbeat           (when (:last-heartbeat d) (double (:last-heartbeat d)))
+     :last-heartbeat-doing     (not-empty (str (:last-heartbeat-doing d "")))
+     :last-heartbeat-progress  (when-let [p (:last-heartbeat-progress d)] (double p))
+     :depends-on               (vec (or (:depends-on d) []))
+     :confidence               (when (:confidence d) (double (:confidence d)))}))
 
 (defn- card->yaml-map
   "Convert a card map to snake_case keys for YAML serialization."
@@ -111,9 +118,11 @@
            "approved_by"      (:approved-by card)}]
     (cond-> m
       (:pending-question card) (assoc "pending_question" (:pending-question card))
-      (:last-heartbeat card)   (assoc "last_heartbeat"   (:last-heartbeat card))
-      (seq (:depends-on card)) (assoc "depends_on"        (vec (:depends-on card)))
-      (:confidence card)       (assoc "confidence"        (:confidence card)))))
+      (:last-heartbeat card)          (assoc "last_heartbeat"          (:last-heartbeat card))
+      (:last-heartbeat-doing card)    (assoc "last_heartbeat_doing"    (:last-heartbeat-doing card))
+      (:last-heartbeat-progress card) (assoc "last_heartbeat_progress" (:last-heartbeat-progress card))
+      (seq (:depends-on card))        (assoc "depends_on"              (vec (:depends-on card)))
+      (:confidence card)              (assoc "confidence"              (:confidence card)))))
 
 ;; ── HistoryEntry shape ────────────────────────────────────────
 ;;
@@ -1306,16 +1315,23 @@
 ;; ── Heartbeat ──────────────────────────────────────────────────
 
 (defn heartbeat!
-  "Record an agent heartbeat for a card."
-  [board card-id & {:keys [agent] :or {agent ""}}]
-  (let [card (load-card board card-id)
-        now  (u/now-epoch)
-        updated (assoc card :last-heartbeat now)]
+  "Record an agent heartbeat for a card.
+   Opts: :agent, :doing (activity string), :progress (0.0-1.0)"
+  [board card-id & {:keys [agent doing progress] :or {agent ""}}]
+  (let [card    (load-card board card-id)
+        now     (u/now-epoch)
+        updated (cond-> (assoc card :last-heartbeat now)
+                  doing    (assoc :last-heartbeat-doing doing)
+                  progress (assoc :last-heartbeat-progress (min 1.0 (max 0.0 (double progress)))))]
     (save-card! board updated)
-    (append-history! board card-id
-                     (make-history-entry "agent" "heartbeat"
-                                         :content "Agent heartbeat"
-                                         :agent-id agent))
+    (let [content (if doing
+                    (str "Agent heartbeat: " doing
+                         (when progress (str " (" (int (* 100 progress)) "%)")))
+                    "Agent heartbeat")]
+      (append-history! board card-id
+                       (make-history-entry "agent" "heartbeat"
+                                           :content content
+                                           :agent-id agent)))
     updated))
 
 ;; ── Watcher checks ─────────────────────────────────────────────
