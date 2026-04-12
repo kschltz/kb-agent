@@ -58,7 +58,8 @@ export type UICommand =
   | { action: 'heartbeat'; card_id: string }
   | { action: 'diff'; card_id: string }
   | { action: 'context'; card_id: string }
-  | { action: 'gates'; card_id: string };
+  | { action: 'gates'; card_id: string }
+  | { action: 'reorder_lanes'; order: string[] };
 
 export type WSMessage =
   | { type: 'state'; data: BoardState }
