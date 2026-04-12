@@ -15,7 +15,7 @@ function heartbeatStaleness(card: CardData): 'fresh' | 'stale' | 'dead' | null {
 }
 
 export function Card({ card, onClick }: CardProps) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
     id: `card-${card.id}`,
     data: { card },
   });
@@ -27,7 +27,7 @@ export function Card({ card, onClick }: CardProps) {
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
     padding: '10px 12px',
-    cursor: 'grab',
+    cursor: 'pointer',
     position: 'relative',
     opacity: isDragging ? 0.4 : 1,
     transform: transform ? `translate(${transform.x}px, ${transform.y}px)${isDragging ? ' scale(0.97)' : ''}` : undefined,
@@ -36,7 +36,19 @@ export function Card({ card, onClick }: CardProps) {
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes} onClick={onClick}>
+    <div ref={setNodeRef} style={style} {...attributes} onClick={onClick}>
+      {/* Drag handle — only this element initiates drag */}
+      <span
+        ref={setActivatorNodeRef}
+        {...listeners}
+        onClick={e => e.stopPropagation()}
+        style={{
+          position: 'absolute', top: 6, right: 6,
+          cursor: 'grab', color: 'var(--text-2)', fontSize: 10, opacity: 0.4,
+          padding: '2px 3px', lineHeight: 1, userSelect: 'none',
+        }}
+        title="Drag to move"
+      >⠿</span>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-2)', marginBottom: 3 }}>#{card.id}</div>
       <div style={{ fontWeight: 500, fontSize: 13, color: 'var(--text-0)', marginBottom: 6, wordBreak: 'break-word' }}>{card.title}</div>
 
