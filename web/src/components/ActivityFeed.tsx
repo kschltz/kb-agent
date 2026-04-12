@@ -106,7 +106,7 @@ export function ActivityFeed({ refreshTick }: Props) {
       </div>
 
       {/* Feed list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
         {entries.length === 0 && !loading && (
           <div style={{ textAlign: 'center', color: 'var(--text-2)', fontSize: 12, marginTop: 40 }}>
             No activity in this time range.
@@ -114,20 +114,19 @@ export function ActivityFeed({ refreshTick }: Props) {
         )}
         {entries.map((e, i) => (
           <div key={i} style={{
-            display: 'grid',
-            gridTemplateColumns: '120px 60px 140px 1fr',
-            gap: 8, padding: '5px 16px',
+            display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 16px',
+            overflow: 'hidden',
             borderBottom: '1px solid var(--bg-0)',
             fontSize: 11, fontFamily: 'var(--mono)',
           }}>
-            <span style={{ color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{fmtFull(e.ts)}</span>
-            <span style={{ color: actionColor(e.action), fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span style={{ flexShrink: 0, width: 80, fontSize: 10, color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{fmtFull(e.ts)}</span>
+            <span style={{ flexShrink: 0, width: 90, color: actionColor(e.action), fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {e.action}
             </span>
-            <span style={{ color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ flexShrink: 0, width: 160, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               #{e.card_id} {e.card_title}
             </span>
-            <span style={{ color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span title={e.content} style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-1)' }}>
               {e.content}
               {e.agent_id && <span style={{ color: 'var(--text-2)', marginLeft: 6 }}>— {e.agent_id}</span>}
             </span>
