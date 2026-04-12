@@ -41,12 +41,13 @@
                            branch worktree created-at updated-at tags
                            pending-approval approved-by
                            pending-question last-heartbeat
-                           depends-on]
+                           depends-on confidence]
                     :or {priority 0 blocked false blocked-reason ""
                          assigned-agent "" branch "" worktree ""
                          pending-approval false approved-by ""
                          pending-question nil
                          last-heartbeat nil
+                         confidence nil
                          tags [] depends-on []}}]
   (let [now (u/now-epoch)]
     {:id               id
@@ -65,7 +66,8 @@
      :approved-by      approved-by
      :pending-question (or pending-question "")
      :last-heartbeat   last-heartbeat
-     :depends-on       depends-on}))
+     :depends-on       depends-on
+     :confidence       confidence}))
 
 (defn- card-from-yaml
   "Convert a YAML map (with snake_case keys as keywords or strings) to a card map."
@@ -87,7 +89,8 @@
      :approved-by      (str (:approved-by d ""))
      :pending-question (or (:pending-question d) "")
      :last-heartbeat   (when (:last-heartbeat d) (double (:last-heartbeat d)))
-     :depends-on       (vec (or (:depends-on d) []))}))
+     :depends-on       (vec (or (:depends-on d) []))
+     :confidence       (when (:confidence d) (double (:confidence d)))}))
 
 (defn- card->yaml-map
   "Convert a card map to snake_case keys for YAML serialization."
@@ -109,7 +112,8 @@
     (cond-> m
       (:pending-question card) (assoc "pending_question" (:pending-question card))
       (:last-heartbeat card)   (assoc "last_heartbeat"   (:last-heartbeat card))
-      (seq (:depends-on card)) (assoc "depends_on"        (vec (:depends-on card))))))
+      (seq (:depends-on card)) (assoc "depends_on"        (vec (:depends-on card)))
+      (:confidence card)       (assoc "confidence"        (:confidence card)))))
 
 ;; ── HistoryEntry shape ────────────────────────────────────────
 ;;
@@ -297,6 +301,15 @@
   "Return configured merge_strategy (default: \"squash\")."
   [board]
   (get (:config board) "merge_strategy" "squash"))
+
+(defn confidence-config
+  "Return global confidence thresholds from board.yaml.
+   Keys: :auto-approve-threshold (default 90), :needs-review-threshold (default nil/disabled), :display (default true)."
+  [board]
+  (let [c (get (:config board) "confidence" {})]
+    {:auto-approve-threshold  (get c "auto_approve_threshold" 90)
+     :needs-review-threshold  (get c "needs_review_threshold" nil)
+     :display                 (get c "display" true)}))
 
 (defn save-config!
   "Save the board config back to board.yaml. Returns the updated config map."
@@ -845,15 +858,18 @@
         [false (str "Card " card-id " is pending approval. Run `kb approve " card-id "` first.") []]
 
         :else
-        (let [target-config (lane-by-name board target-lane)
-              min-conf      (get target-config "min_confidence")
-              ;; Check confidence threshold
-              low-confidence? (and min-conf confidence (< confidence min-conf))]
+        (let [target-config  (lane-by-name board target-lane)
+              min-conf       (get target-config "min_confidence")
+              conf-cfg       (confidence-config board)
+              nrt            (:needs-review-threshold conf-cfg)
+              ;; Check confidence threshold — per-lane min_confidence takes precedence over global
+              low-confidence? (or (and min-conf confidence (< confidence min-conf))
+                                  (and nrt confidence (nil? min-conf) (< confidence nrt)))]
           (if low-confidence?
             ;; Auto-block the card instead of moving
             (do
-              (let [reason (str "Low confidence (" confidence "% < " min-conf "% min for '" target-lane "')")
-                    card2  (assoc card :blocked true :blocked-reason reason)]
+              (let [reason (str "Low confidence (" confidence "%" (if min-conf (str " < " min-conf "% min for '" target-lane "'") (str " below threshold " nrt "%")) ")")
+                    card2  (assoc card :blocked true :blocked-reason reason :confidence confidence)]
                 (save-card! board card2))
               (append-history! board card-id
                                (make-history-entry "system" "blocked"
@@ -891,11 +907,15 @@
                 (let [gr (last gate-results)]
                   [false (str "Gate failed: " (:gate gr) "\n" (:output gr)) gate-results])
                 ;; All gates passed — check if target lane requires approval
-                (if (get target-config "requires_approval")
+                (let [auto-approve? (and (get target-config "requires_approval")
+                                         confidence
+                                         (>= confidence (:auto-approve-threshold conf-cfg)))]
+                (if (and (get target-config "requires_approval") (not auto-approve?))
                   ;; Move to target lane but mark as pending approval
                   (do
                     (let [card2 (assoc card :lane target-lane
                                           :pending-approval true
+                                          :confidence confidence
                                           :assigned-agent (:assigned-agent card))]
                       (save-card! board card2))
                     (append-history! board card-id
@@ -915,8 +935,13 @@
                                                          :agent-id agent))
                     (run-hooks! board "approval_required" (load-card board card-id) :agent agent)
                     [true (str "Moved to '" target-lane "' — awaiting approval. Run `kb approve " card-id "` to approve.") gate-results])
-                  ;; No approval needed — handle on_enter: merge
+                  ;; No approval needed (or auto-approved) — handle on_enter: merge
                   (let [on-enter (get target-config "on_enter")]
+                  (when auto-approve?
+                    (append-history! board card-id
+                                     (make-history-entry "system" "approved"
+                                                         :content (str "Auto-approved: confidence " confidence "% >= threshold " (:auto-approve-threshold conf-cfg) "%")
+                                                         :agent-id agent)))
                   (if (and (= on-enter "merge") (not (str/blank? (:branch card))))
                     (try
                       (merge-card! board card)
@@ -926,7 +951,7 @@
                                                                          " merged into " (base-branch board)
                                                                          " (" (merge-strategy board) ")")))
                       (remove-worktree! board card :delete-branch true)
-                      (let [card2 (assoc card :worktree "" :branch "" :lane target-lane :assigned-agent "")]
+                      (let [card2 (assoc card :worktree "" :branch "" :lane target-lane :assigned-agent "" :confidence confidence)]
                         (save-card! board card2)
                         (append-history! board card-id
                                          (make-history-entry "system" "moved"
@@ -948,7 +973,7 @@
                         [false (str "Merge failed: " e) gate-results]))
                     ;; No merge needed — just move
                     (do
-                      (let [card2 (assoc card :lane target-lane :assigned-agent "")]
+                      (let [card2 (assoc card :lane target-lane :assigned-agent "" :confidence confidence)]
                         (save-card! board card2))
                       (append-history! board card-id
                                        (make-history-entry "system" "moved"
@@ -964,7 +989,7 @@
                       (let [final-lane (last (lane-names board))]
                         (when (= target-lane final-lane)
                           (run-hooks! board "completed" (load-card board card-id) :agent agent)))
-                      [true (str "Moved to '" target-lane "'.") gate-results]))))))))))))))
+                      [true (str "Moved to '" target-lane "'.") gate-results]))))))))))))))))
 
 (defn reject!
   "Move card back to previous lane."

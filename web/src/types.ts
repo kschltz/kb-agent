@@ -34,6 +34,7 @@ export interface CardData {
   approved_by: string;
   pending_question: string;
   last_heartbeat: number | null;
+  confidence?: number;
 }
 
 export interface HistoryEntry {

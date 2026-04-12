@@ -439,12 +439,14 @@
             (if (empty? lane-cards)
               (println "  (empty)")
               (doseq [c lane-cards]
-                (let [flags (cond-> []
+                (let [conf-cfg (b/confidence-config board)
+                      flags (cond-> []
                               (:blocked c) (conj "BLOCKED")
                               (:pending-approval c) (conj "PENDING APPROVAL")
                               (and (:pending-question c) (not (str/blank? (:pending-question c)))) (conj "QUESTION")
                               (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
                               (not (str/blank? (:branch c ""))) (conj (:branch c))
+                              (and (:confidence c) (:display conf-cfg)) (conj (str "C:" (int (:confidence c)) "%"))
                               (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c)))))
                       flag-str (if (seq flags)
                                  (str "  (" (str/join ", " flags) ")")
