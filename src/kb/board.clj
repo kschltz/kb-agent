@@ -989,7 +989,7 @@
                       (let [final-lane (last (lane-names board))]
                         (when (= target-lane final-lane)
                           (run-hooks! board "completed" (load-card board card-id) :agent agent)))
-                      [true (str "Moved to '" target-lane "'.") gate-results]))))))))))))))))
+                      [true (str "Moved to '" target-lane "'.") gate-results])))))))))))))))
 
 (defn reject!
   "Move card back to previous lane."
