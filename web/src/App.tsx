@@ -23,6 +23,16 @@ export default function App() {
   const { board, connected, send, lastResult } = useBoard();
   const [selectedCard, setSelectedCard] = useState<CardData | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [zoom, setZoom] = useState<number>(() => {
+    const stored = localStorage.getItem('kb-zoom');
+    const parsed = stored ? parseFloat(stored) : 1;
+    return isNaN(parsed) ? 1 : parsed;
+  });
+
+  const handleZoomChange = (next: number) => {
+    setZoom(next);
+    localStorage.setItem('kb-zoom', String(next));
+  };
 
   // Keep selected card data fresh when board updates
   useEffect(() => {
@@ -39,8 +49,8 @@ export default function App() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <Header board={board} connected={connected} onAddCard={() => setAddDialogOpen(true)} />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', zoom }}>
+      <Header board={board} connected={connected} onAddCard={() => setAddDialogOpen(true)} zoom={zoom} onZoomChange={handleZoomChange} />
 
       {board && !board.error ? (
         <Board board={board} onCardClick={setSelectedCard} send={send} />

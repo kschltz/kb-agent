@@ -4,9 +4,17 @@ interface HeaderProps {
   board: BoardState | null;
   connected: boolean;
   onAddCard: () => void;
+  zoom: number;
+  onZoomChange: (zoom: number) => void;
 }
 
-export function Header({ board, connected, onAddCard }: HeaderProps) {
+const ZOOM_MIN = 0.7;
+const ZOOM_MAX = 1.4;
+const ZOOM_STEP = 0.1;
+
+export function Header({ board, connected, onAddCard, zoom, onZoomChange }: HeaderProps) {
+  const canDecrease = zoom > ZOOM_MIN + 0.001;
+  const canIncrease = zoom < ZOOM_MAX - 0.001;
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -27,6 +35,38 @@ export function Header({ board, connected, onAddCard }: HeaderProps) {
         }}>⎇ {board?.base_branch || 'main'}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button
+            onClick={() => onZoomChange(Math.max(ZOOM_MIN, parseFloat((zoom - ZOOM_STEP).toFixed(1))))}
+            disabled={!canDecrease}
+            title="Decrease font size"
+            style={{
+              fontFamily: 'var(--mono)', fontSize: 12, padding: '4px 8px',
+              background: 'var(--bg-2)', border: '1px solid var(--border)',
+              color: canDecrease ? 'var(--text-1)' : 'var(--text-2)',
+              borderRadius: 'var(--radius)', cursor: canDecrease ? 'pointer' : 'default',
+            }}>A−</button>
+          {zoom !== 1 && (
+            <button
+              onClick={() => onZoomChange(1)}
+              title="Reset font size"
+              style={{
+                fontFamily: 'var(--mono)', fontSize: 10, padding: '4px 6px',
+                background: 'var(--bg-2)', border: '1px solid var(--border)',
+                color: 'var(--text-2)', borderRadius: 'var(--radius)', cursor: 'pointer',
+              }}>{Math.round(zoom * 100)}%</button>
+          )}
+          <button
+            onClick={() => onZoomChange(Math.min(ZOOM_MAX, parseFloat((zoom + ZOOM_STEP).toFixed(1))))}
+            disabled={!canIncrease}
+            title="Increase font size"
+            style={{
+              fontFamily: 'var(--mono)', fontSize: 12, padding: '4px 8px',
+              background: 'var(--bg-2)', border: '1px solid var(--border)',
+              color: canIncrease ? 'var(--text-1)' : 'var(--text-2)',
+              borderRadius: 'var(--radius)', cursor: canIncrease ? 'pointer' : 'default',
+            }}>A+</button>
+        </div>
         <button onClick={onAddCard} style={{
           fontFamily: 'var(--mono)', fontSize: 12, padding: '5px 14px',
           background: 'var(--bg-2)', border: '1px solid var(--border)',
