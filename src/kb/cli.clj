@@ -9,6 +9,57 @@
             [kb.board :as b]
             [kb.util :as u]))
 
+;; ── Agent instructions (presentation concern) ────────────────
+
+(def agent-instructions
+  "Markdown string with kb workflow instructions for coding agents.
+   Used by `kb init` (appended to CLAUDE.md) and `kb help --agent`."
+  (str/join "\n"
+    ["# kb — Kanban Board Workflow"
+     ""
+     "This project uses `kb` for task management."
+     ""
+     "## Working with the Board"
+     ""
+     "1. `kb status` — see all lanes and cards"
+     "2. `kb pull --lane in-progress --agent claude` — claim the next card (auto-moves to that lane, creates worktree + branch)"
+     "3. Work in the card's worktree (shown in pull output)"
+     "4. `kb note <id> \"what you did\"` — log progress"
+     "5. `kb ask <id> \"question\"` — ask the human (blocks the card until answered)"
+     "6. `kb log <id>` — check for human notes or answers before each major step"
+     "7. `kb heartbeat <id>` — signal you are still working (call every 2 minutes)"
+     "8. `kb advance <id>` — move card to next lane (runs quality gates)"
+     "9. `kb done <id>` — move card to final lane (runs all gates)"
+     "10. If gates fail, read the output, fix the issue, and retry"
+     ""
+     "## Rules"
+     ""
+     "- Always work inside the card's worktree, not the main tree"
+     "- Use `kb context <id>` to get full card context including lane instructions"
+     "- Use `kb note` to record key decisions and progress"
+     "- Use `kb ask` when you need clarification — the card blocks until the human answers"
+     "- Do not skip quality gates — fix failures before retrying"
+     "- One card at a time unless explicitly told to work on multiple"
+     ""
+     "## Quick Reference"
+     ""
+     "| Command | Description |"
+     "|---------|-------------|"
+     "| `kb status` | Show all lanes and cards |"
+     "| `kb pull [--lane L] [--agent A]` | Claim next card |"
+     "| `kb show <id>` | Card details |"
+     "| `kb context <id>` | Full card context for agent prompt |"
+     "| `kb note <id> \"msg\"` | Log progress |"
+     "| `kb ask <id> \"question\"` | Ask the human (blocks card) |"
+     "| `kb advance <id>` | Move to next lane (runs gates) |"
+     "| `kb done <id>` | Move to final lane (runs all gates) |"
+     "| `kb block <id> --reason R` | Mark card blocked |"
+     "| `kb heartbeat <id>` | Record agent heartbeat |"
+     "| `kb diff <id>` | Show diff vs base branch |"
+     "| `kb link <id> <dep-id>` | Add dependency |"
+     "| `kb deps <id>` | Show dependencies |"
+     ""]))
+
 ;; ── Output helpers ────────────────────────────────────────────
 
 (defn- fail!
@@ -99,7 +150,11 @@
   [{:keys [opts]}]
   (let [path (or (:path opts) ".")]
     (try
-      (let [board (b/init-board! path)]
+      (let [board (b/init-board! path)
+            project-root (.toAbsolutePath (u/->path path))
+            claude-md    (str (u/path-resolve project-root "CLAUDE.md"))
+            prefix       (if (u/path-exists? claude-md) "\n" "")]
+        (spit claude-md (str prefix agent-instructions) :append true)
         (println (str "Initialized kanban board at " (:root board)))
         (println (str "Base branch: " (b/base-branch board)))
         (println "Edit .kanban/board.yaml to configure lanes and gates.")
@@ -760,7 +815,7 @@
   [{:keys [opts]}]
   (if (:agent opts)
     ;; Agent-friendly output — workflow + quick reference
-    (print (b/agent-instructions))
+    (print agent-instructions)
     ;; Human-friendly output — flag list
     (do
       (println "Usage: kb <command> [options]")
@@ -794,7 +849,7 @@
       (println "  recover  [opts]                         Detect and clean orphaned resources")
       (println)
       (println "Use `kb help --agent` for agent-friendly workflow instructions.")
-      (System/exit 1))))
+      (System/exit 0))))
 
 ;; ── Dispatch table ────────────────────────────────────────────
 
