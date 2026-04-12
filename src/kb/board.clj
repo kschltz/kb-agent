@@ -42,7 +42,7 @@
                            pending-approval approved-by
                            pending-question last-heartbeat
                            last-heartbeat-doing last-heartbeat-progress
-                           depends-on confidence]
+                           depends-on confidence parent-id]
                     :or {priority 0 blocked false blocked-reason ""
                          assigned-agent "" branch "" worktree ""
                          pending-approval false approved-by ""
@@ -51,6 +51,7 @@
                          last-heartbeat-doing nil
                          last-heartbeat-progress nil
                          confidence nil
+                         parent-id nil
                          tags [] depends-on []}}]
   (let [now (u/now-epoch)]
     {:id                       id
@@ -72,7 +73,8 @@
      :last-heartbeat-doing     last-heartbeat-doing
      :last-heartbeat-progress  last-heartbeat-progress
      :depends-on               depends-on
-     :confidence               confidence}))
+     :confidence               confidence
+     :parent-id                parent-id}))
 
 (defn- card-from-yaml
   "Convert a YAML map (with snake_case keys as keywords or strings) to a card map."
@@ -97,7 +99,8 @@
      :last-heartbeat-doing     (not-empty (str (:last-heartbeat-doing d "")))
      :last-heartbeat-progress  (when-let [p (:last-heartbeat-progress d)] (double p))
      :depends-on               (vec (or (:depends-on d) []))
-     :confidence               (when (:confidence d) (double (:confidence d)))}))
+     :confidence               (when (:confidence d) (double (:confidence d)))
+     :parent-id                (not-empty (str (:parent-id d "")))}))
 
 (defn- card->yaml-map
   "Convert a card map to snake_case keys for YAML serialization."
@@ -122,7 +125,8 @@
       (:last-heartbeat-doing card)    (assoc "last_heartbeat_doing"    (:last-heartbeat-doing card))
       (:last-heartbeat-progress card) (assoc "last_heartbeat_progress" (:last-heartbeat-progress card))
       (seq (:depends-on card))        (assoc "depends_on"              (vec (:depends-on card)))
-      (:confidence card)              (assoc "confidence"              (:confidence card)))))
+      (:confidence card)              (assoc "confidence"              (:confidence card))
+      (:parent-id card)               (assoc "parent_id"               (:parent-id card))))
 
 ;; ── HistoryEntry shape ────────────────────────────────────────
 ;;
@@ -523,6 +527,61 @@
        (filter #(= (:lane %) lane-name))
        (sort-by (juxt :priority :created-at))
        vec))
+
+(defn children-of
+  "Return all cards whose :parent-id equals the given card-id."
+  [board card-id]
+  (filterv #(= (:parent-id %) card-id) (all-cards board)))
+
+(defn split!
+  "Create child cards from a parent card.
+   Each child is created in the same lane as the parent with :parent-id set.
+   The parent card is blocked while children are open.
+   Returns the vector of child cards."
+  [board parent-id child-titles]
+  (let [parent (load-card board parent-id)
+        ;; Prevent cycles: parent must not itself be a child
+        _ (when (:parent-id parent)
+            (throw (ex-info (str "Card " parent-id " is already a child card. Cannot split a child into children.")
+                            {:parent-id parent-id})))
+        children
+        (mapv (fn [title]
+                (let [child-id  (next-id board)
+                      slug      (u/slugify title)
+                      child     (make-card child-id title (:lane parent) :parent-id parent-id)
+                      card-dir  (create-card-dir board child-id slug)]
+                  (save-card! board child card-dir)
+                  (append-history! board child-id
+                                   (make-history-entry "system" "created"
+                                                       :content (str "Child card created from parent #" parent-id
+                                                                     " in lane '" (:lane parent) "'")))
+                  child))
+              child-titles)
+        child-ids (mapv :id children)
+        block-reason (str "Waiting for child cards: " (str/join ", " child-ids))]
+    (block! board parent-id block-reason)
+    (append-history! board parent-id
+                     (make-history-entry "system" "split"
+                                         :content (str "Split into child cards: " (str/join ", " child-ids))))
+    children))
+
+(defn- maybe-unblock-parent!
+  "If card has a parent-id and has just moved to the final lane,
+   check if all siblings are done. If so, unblock the parent."
+  [board card]
+  (when-let [pid (:parent-id card)]
+    (let [final-lane (last (lane-names board))
+          siblings   (children-of board pid)]
+      (when (every? #(= final-lane (:lane %)) siblings)
+        (try
+          (unblock! board pid)
+          (append-history! board pid
+                           (make-history-entry "system" "unblocked"
+                                               :content (str "All child cards completed: "
+                                                             (str/join ", " (mapv :id siblings)))))
+          (catch Exception _
+            ;; If parent is not blocked (already unblocked), ignore
+            nil))))))
 
 ;; ── Git / worktree operations ─────────────────────────────────
 
@@ -995,6 +1054,7 @@
                         (doseq [gr gate-results]
                           (run-hooks! board "gate_pass" card :gate (:gate gr) :agent agent))
                         (run-hooks! board "completed" card2 :agent agent)
+                        (maybe-unblock-parent! board card2)
                         [true (str "Moved to '" target-lane "'.") gate-results])
                       (catch Exception e
                         (append-history! board card-id
@@ -1018,7 +1078,8 @@
                         (run-hooks! board "gate_pass" card :gate (:gate gr) :agent agent))
                       (let [final-lane (last (lane-names board))]
                         (when (= target-lane final-lane)
-                          (run-hooks! board "completed" (load-card board card-id) :agent agent)))
+                          (run-hooks! board "completed" (load-card board card-id) :agent agent)
+                          (maybe-unblock-parent! board (load-card board card-id))))
                       [true (str "Moved to '" target-lane "'.") gate-results])))))))))))))))
 
 (defn reject!
@@ -1615,7 +1676,21 @@
                         dep-status (if (seq usdeps)
                                      (str "BLOCKED — " (count usdeps) " unsatisfied dependenc"
                                            (if (= 1 (count usdeps)) "y" "ies"))
-                                     "UNBLOCKED — all dependencies satisfied")]
+                                     "UNBLOCKED — all dependencies satisfied")
+                        ;; Parent/child context
+                        parent-lines (when-let [pid (:parent-id card)]
+                                       (let [p (try (load-card board pid) (catch Exception _ nil))]
+                                         (when p
+                                           ["## Part of"
+                                            (str "This card is a subtask of #" pid ": " (:title p)
+                                                 " [" (:lane p) "]")
+                                            ""])))
+                        child-cards  (children-of board card-id)
+                        children-lines (when (seq child-cards)
+                                         (into ["## Child cards" ""]
+                                               (mapv #(str "- [" (:id %) "] " (:title %)
+                                                           " (" (:lane %) ")")
+                                                     child-cards)))]
                     (-> [(str "# Task: " (:title card))
                          (str "Card ID: " (:id card))
                          (str "Lane: " (:lane card))
@@ -1624,6 +1699,7 @@
                          (str "Worktree: " (:worktree card))
                          (str "Base branch: " base)
                          ""]
+                        (into parent-lines)
                         (into (let [lane    (:lane card)
                                     md-ins  (load-lane-md board lane)]
                                 (if md-ins
@@ -1658,6 +1734,7 @@
                       (into (when (not-empty board-summary)
                                ["## Board summary" "" board-summary ""]))
                       (into deps-output)
+                      (into children-lines)
                       (into (when (seq lane-cards)
                                (into ["## Other cards in your lane" ""]
                                      (mapv #(str "- [" (:id %) "] " (:title %)

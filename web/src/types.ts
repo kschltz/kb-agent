@@ -37,6 +37,7 @@ export interface CardData {
   last_heartbeat_doing?: string;
   last_heartbeat_progress?: number;
   confidence?: number;
+  parent_id?: string;
 }
 
 export interface HistoryEntry {

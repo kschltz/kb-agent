@@ -72,6 +72,7 @@ export function Card({ card, onClick }: CardProps) {
         {card.branch && <Badge color="blue" truncate>{card.branch.replace('kb/', '')}</Badge>}
         {card.diff_stat?.trim() && <Badge color="purple">Δ</Badge>}
         {card.confidence != null && <Badge color={card.confidence >= 80 ? 'accent' : card.confidence >= 50 ? 'amber' : 'danger'}>C:{card.confidence}%</Badge>}
+        {card.parent_id && <Badge color="purple" truncate>⊂ {card.parent_id}</Badge>}
         {hb === 'fresh' && <Badge color="accent">💚 alive</Badge>}
         {hb === 'stale' && <Badge color="amber">⚠️ stale</Badge>}
         {hb === 'dead' && <Badge color="danger">💤 no signal</Badge>}

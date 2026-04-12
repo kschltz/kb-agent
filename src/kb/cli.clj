@@ -438,25 +438,51 @@
             (println (str header (apply str (repeat (max 0 (- 60 (count header))) "\u2500"))))
             (if (empty? lane-cards)
               (println "  (empty)")
-              (doseq [c lane-cards]
-                (let [conf-cfg (b/confidence-config board)
-                      flags (cond-> []
-                              (:blocked c) (conj "BLOCKED")
-                              (:pending-approval c) (conj "PENDING APPROVAL")
-                              (and (:pending-question c) (not (str/blank? (:pending-question c)))) (conj "QUESTION")
-                              (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
-                              (not (str/blank? (:branch c ""))) (conj (:branch c))
-                              (and (:confidence c) (:display conf-cfg)) (conj (str "C:" (int (:confidence c)) "%"))
-                              (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c))))
-                              (not (str/blank? (:last-heartbeat-doing c "")))
-                              (conj (str "doing: " (:last-heartbeat-doing c)
-                                         (when (:last-heartbeat-progress c)
-                                           (str " " (int (* 100 (:last-heartbeat-progress c))) "%")))))
-                      flag-str (if (seq flags)
-                                 (str "  (" (str/join ", " flags) ")")
-                                 "")]
-                  (println (str "  [" (:id c) "] " (:title c) flag-str)))))
+              (let [conf-cfg (b/confidence-config board)
+                    ;; Only show top-level cards (not children) at top level
+                    top-level (filterv #(nil? (:parent-id %)) lane-cards)]
+                (doseq [c top-level]
+                  (let [flags (cond-> []
+                                (:blocked c) (conj "BLOCKED")
+                                (:pending-approval c) (conj "PENDING APPROVAL")
+                                (and (:pending-question c) (not (str/blank? (:pending-question c)))) (conj "QUESTION")
+                                (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
+                                (not (str/blank? (:branch c ""))) (conj (:branch c))
+                                (and (:confidence c) (:display conf-cfg)) (conj (str "C:" (int (:confidence c)) "%"))
+                                (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c))))
+                                (not (str/blank? (:last-heartbeat-doing c "")))
+                                (conj (str "doing: " (:last-heartbeat-doing c)
+                                           (when (:last-heartbeat-progress c)
+                                             (str " " (int (* 100 (:last-heartbeat-progress c))) "%")))))
+                        flag-str (if (seq flags)
+                                   (str "  (" (str/join ", " flags) ")")
+                                   "")]
+                    (println (str "  [" (:id c) "] " (:title c) flag-str))
+                    ;; Show children indented
+                    (doseq [child (b/children-of board (:id c))]
+                      (println (str "    \u2514\u2500 [" (:id child) "] " (:title child)
+                                    " (" (:lane child) ")"
+                                    (when (:blocked child) " BLOCKED"))))))))
             (println)))))))
+
+(defn cmd-split
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        titles (:args opts)
+        _ (when (empty? titles) (fail! "at least one child title is required"))
+        board (b/make-board)]
+    (try
+      (let [children (b/split! board card-id titles)]
+        (if (:json opts)
+          (out-json (mapv #(select-keys % [:id :title :lane :parent-id]) children))
+          (do
+            (println (str "Split card " card-id " into " (count children) " child card(s):"))
+            (doseq [c children]
+              (println (str "  [" (:id c) "] " (:title c) " [" (:lane c) "]")))
+            (println (str "Parent card " card-id " is now blocked pending child completion.")))))
+      (catch Exception e
+        (fail! (.getMessage e))))))
 
 (defn cmd-context
   [{:keys [opts]}]
@@ -919,6 +945,7 @@
       (println "  spawn    <card-id>                      Spawn a sub-agent for a card")
       (println "  cleanup  <card-id> [opts]               Remove worktree for a card")
       (println "  serve    [--host 127.0.0.1] [--port 8741]  Start web UI server")
+      (println "  split    <card-id> <title1> [title2...]  Split card into child cards")
       (println "  recover  [opts]                         Detect and clean orphaned resources")
       (println)
       (println "Use `kb help --agent` for agent-friendly workflow instructions.")
@@ -983,6 +1010,7 @@
            :agent {:desc "Agent name to assign"
                     :type :string :alias \a}}}
    {:cmds ["cleanup"] :fn cmd-cleanup :args->opts [:card-id]}
+   {:cmds ["split"] :fn cmd-split :args->opts [:card-id]}
    {:cmds ["link"] :fn cmd-link :args->opts [:card-id :dep-id]}
    {:cmds ["unlink"] :fn cmd-unlink :args->opts [:card-id :dep-id]}
    {:cmds ["deps"] :fn cmd-deps :args->opts [:card-id]}
