@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { CardData, UICommand } from '../types';
-import { fmtTime, fmtFull } from '../lib/utils';
+import { fmtTime, fmtFull, colorDiff } from '../lib/utils';
 
 interface CardDetailProps {
   card: CardData | null;
@@ -42,9 +42,19 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
     }
   };
 
-  const viewFullDiff = () => {
-    send({ action: 'diff', card_id: card.id });
+  const viewFullDiff = async () => {
     setDiffHtml('<span style="color:var(--text-2)">Loading diff...</span>');
+    try {
+      const resp = await fetch(`/api/cards/${card.id}/diff`);
+      const data = await resp.json() as { diff?: string; error?: string };
+      if (data.diff !== undefined) {
+        setDiffHtml(data.diff.trim() ? colorDiff(data.diff) : '<span style="color:var(--text-2)">No changes yet.</span>');
+      } else {
+        setDiffHtml(`<span style="color:var(--danger)">${data.error ?? 'Failed to load diff'}</span>`);
+      }
+    } catch {
+      setDiffHtml('<span style="color:var(--danger)">Network error loading diff.</span>');
+    }
   };
 
   const sendAsk = () => {
