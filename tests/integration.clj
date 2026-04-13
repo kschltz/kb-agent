@@ -525,6 +525,34 @@
   (println "\n== whoami cleanup ==")
   (cleanup dir))
 
+;; ── Priority-aware kb pull ─────────────────────────────────────
+
+(let [dir (make-repo)]
+
+  (println "\n== Priority-aware pull ==")
+  (kb dir "init")
+
+  ;; Add 3 cards: two with priority 5 (FIFO among them), one with priority 0
+  (kb dir "add" "High priority A" "--priority" "5")   ;; 001
+  (kb dir "add" "Low priority" "--priority" "0")      ;; 002
+  (kb dir "add" "High priority B" "--priority" "5")   ;; 003
+
+  ;; First pull: should pick 001 (priority 5, created first — FIFO tiebreak)
+  (let [r (kb dir "pull" "--agent" "test")]
+    (T "priority pull: exits 0" (:ok r) (:err r))
+    (T "priority pull: picks highest priority (FIFO first)" (str/includes? (txt r) "001") (txt r)))
+
+  ;; Second pull: should pick 003 (priority 5, next by FIFO)
+  (let [r (kb dir "pull" "--agent" "test")]
+    (T "priority pull: FIFO tiebreak (second)" (str/includes? (txt r) "003") (txt r)))
+
+  ;; Third pull: should pick 002 (priority 0 — lowest)
+  (let [r (kb dir "pull" "--agent" "test")]
+    (T "priority pull: lowest priority last" (str/includes? (txt r) "002") (txt r)))
+
+  (println "\n== Priority-aware pull cleanup ==")
+  (cleanup dir))
+
 ;; ── kb undo / kb trash ─────────────────────────────────────────
 
 (let [dir (make-repo)]
