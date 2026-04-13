@@ -101,6 +101,9 @@ kb serve                             # open web UI
 | `kb context <card>` | Output card context for agent system prompt |
 | `kb spawn <card>` | Start a sub-agent scoped to this card |
 | `kb cleanup <card>` | Remove worktree, optionally delete branch |
+| `kb undo [--steps N]` | Restore the most recent N destructive actions (default: 1) |
+| `kb trash list` | Show undo log (newest first) |
+| `kb trash purge [--days N]` | Remove undo entries older than N days (default: 30) |
 | `kb recover [--clean]` | Detect and clean orphaned worktrees |
 | `kb watch` | Poll for stale heartbeats and expired approvals |
 | `kb serve [--port 8741]` | Start web UI |

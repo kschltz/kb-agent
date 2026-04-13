@@ -638,6 +638,50 @@
       (out-json {:status "ok"})
       (println (str "Cleaned up card " card-id)))))
 
+(defn cmd-undo
+  [{:keys [opts]}]
+  (let [board   (b/make-board)
+        steps   (or (:steps opts) 1)
+        results (b/undo! board :steps steps)]
+    (if (:json opts)
+      (out-json results)
+      (if (empty? results)
+        (println "Nothing to undo.")
+        (doseq [r results]
+          (if (:restored r)
+            (println (str "Undone: " (:op r) " on card " (:card_id r)))
+            (println (str "Failed to undo " (:op r) " on card " (:card_id r)
+                          (when (:error r) (str ": " (:error r)))))))))))
+
+(defn cmd-trash
+  [{:keys [opts args]}]
+  (let [board     (b/make-board)
+        sub-cmd   (first args)]
+    (cond
+      (= sub-cmd "list")
+      (let [entries (b/trash-list board)]
+        (if (:json opts)
+          (out-json entries)
+          (if (empty? entries)
+            (println "Undo log is empty.")
+            (do
+              (println (str "  Undo log (" (count entries) " entries, newest first):"))
+              (doseq [e entries]
+                (println (str "  " (u/fmt-ts (get e "ts")) "  " (get e "op")
+                               "  [" (get e "card_id") "]")))))))
+
+      (= sub-cmd "purge")
+      (let [days    (or (:days opts) 30)
+            purged  (b/trash-purge! board :retention-days days)]
+        (if (:json opts)
+          (out-json {:purged purged})
+          (println (str "Purged " purged " undo entries older than " days " days."))))
+
+      :else
+      (do
+        (println "Usage: kb trash <list|purge> [--days N]")
+        (System/exit 1)))))
+
 (defn cmd-recover
   [{:keys [opts]}]
   (let [board (b/make-board)
@@ -1026,6 +1070,9 @@
            :agent {:desc "Agent name to assign"
                     :type :string :alias \a}}}
    {:cmds ["cleanup"] :fn cmd-cleanup :args->opts [:card-id]}
+   {:cmds ["undo"] :fn cmd-undo
+    :opts {:steps {:desc "Number of actions to undo (default: 1)" :type :number}}}
+   {:cmds ["trash"] :fn cmd-trash}
    {:cmds ["split"] :fn cmd-split :args->opts [:card-id]}
    {:cmds ["link"] :fn cmd-link :args->opts [:card-id :dep-id]}
    {:cmds ["unlink"] :fn cmd-unlink :args->opts [:card-id :dep-id]}

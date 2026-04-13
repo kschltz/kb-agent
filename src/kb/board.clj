@@ -8,7 +8,8 @@
   (:import [java.nio.file Path]))
 
 ;; Forward declaration (move! defined after pull!)
-(declare move! deps-satisfied? all-cards find-card-dir! save-card! append-history! lane-by-name)
+(declare move! deps-satisfied? all-cards find-card-dir! save-card! append-history! lane-by-name
+         append-undo-entry!)
 
 ;; ── Key translation helpers ───────────────────────────────────
 ;;
@@ -1099,6 +1100,10 @@
   "Move card back to previous lane."
   [board card-id & {:keys [reason agent] :or {reason "" agent ""}}]
   (let [card      (load-card board card-id)
+        _         (append-undo-entry! board {:ts       (u/now-epoch)
+                                             :op       "reject"
+                                             :card_id  card-id
+                                             :snapshot (card->yaml-map card)})
         names     (lane-names board)
         idx       (.indexOf names (:lane card))
         prev-lane (nth names (max 0 (dec idx)))
@@ -1203,6 +1208,10 @@
   "Remove worktree for a card and optionally delete the branch."
   [board card-id & {:keys [delete-branch] :or {delete-branch false}}]
   (let [card    (load-card board card-id)
+        _       (append-undo-entry! board {:ts       (u/now-epoch)
+                                           :op       "cleanup"
+                                           :card_id  card-id
+                                           :snapshot (card->yaml-map card)})
         _       (remove-worktree! board card :delete-branch delete-branch)
         updated (cond-> (assoc card :worktree "")
                   delete-branch (assoc :branch ""))]
@@ -1210,6 +1219,75 @@
     (append-history! board card-id
                      (make-history-entry "system" "cleanup"
                                          :content (str "Worktree removed. Branch deleted: " delete-branch)))))
+
+;; ── Trash / Undo ──────────────────────────────────────────────
+
+(defn- undo-log-path [board]
+  (u/path-resolve (:root board) ".undo_log.jsonl"))
+
+(defn- read-undo-log [board]
+  (u/slurp-json-lines (undo-log-path board)))
+
+(defn- write-undo-log! [board entries]
+  (let [path    (undo-log-path board)
+        content (if (seq entries)
+                  (str (str/join "\n" (map json/generate-string entries)) "\n")
+                  "")]
+    (u/atomic-write! path content)))
+
+(defn- append-undo-entry!
+  "Snapshot card state before a destructive op. Appended to .undo_log.jsonl."
+  [board entry]
+  (u/flock-append! (undo-log-path board) (json/generate-string entry)))
+
+(defn trash-list
+  "Return undo log entries newest-first."
+  [board]
+  (vec (reverse (read-undo-log board))))
+
+(defn trash-purge!
+  "Remove undo entries older than retention-days (default 30). Returns count purged."
+  [board & {:keys [retention-days] :or {retention-days 30}}]
+  (let [entries  (read-undo-log board)
+        cutoff   (- (u/now-epoch) (* retention-days 86400))
+        keep     (filterv #(>= (get % "ts" 0) cutoff) entries)
+        n-purged (- (count entries) (count keep))]
+    (write-undo-log! board keep)
+    n-purged))
+
+(defn undo!
+  "Restore the most recent N undoable actions. Returns vector of result maps."
+  [board & {:keys [steps] :or {steps 1}}]
+  (let [entries (read-undo-log board)
+        take-n  (min steps (count entries))
+        to-undo (vec (take-last take-n entries))
+        keep    (vec (drop-last take-n entries))
+        results (mapv
+                 (fn [e]
+                   (let [op      (get e "op")
+                         card-id (get e "card_id")
+                         snap    (get e "snapshot")]
+                     (try
+                       (let [card     (load-card board card-id)
+                             restored (cond-> card
+                                        snap (assoc
+                                               :lane           (get snap "lane" (:lane card))
+                                               :assigned-agent (get snap "assigned_agent" "")
+                                               :blocked        (boolean (get snap "blocked" false))
+                                               :blocked-reason (get snap "blocked_reason" "")
+                                               :worktree       (get snap "worktree" "")
+                                               :branch         (get snap "branch" "")
+                                               :reviewer       (get snap "reviewer" "")))]
+                         (save-card! board restored)
+                         (append-history! board card-id
+                                          (make-history-entry "system" "undone"
+                                                              :content (str "Undo " op ": state restored")))
+                         {:op op :card_id card-id :restored true})
+                       (catch Exception ex
+                         {:op op :card_id card-id :restored false :error (.getMessage ex)}))))
+                 to-undo)]
+    (write-undo-log! board keep)
+    results))
 
 ;; ── Recovery ──────────────────────────────────────────────────
 
