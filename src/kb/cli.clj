@@ -583,50 +583,63 @@
     (spawn-agent board card)))
 
 (defn cmd-spawn-parallel
-  "Pull N available cards and spawn agents for each in parallel."
+  "Pull up to N independent, available cards and spawn agents for each in parallel.
+   Cards with unsatisfied dependencies are automatically excluded by find-available-card,
+   ensuring no two spawned cards are in the same dependency chain."
   [{:keys [opts]}]
   (let [n       (or (:count opts) 2)
         lane    (:lane opts)
         agent   (or (:agent opts) "claude")
         board   (b/make-board)
         pulled  (atom [])]
-    ;; Pull up to n cards
+    ;; Pull up to n independent cards; find-available-card skips cards whose
+    ;; deps are not yet in the done lane, so chained cards are never co-selected.
     (dotimes [_ n]
       (let [card (b/pull! board :agent agent :lane lane)]
         (when card
           (swap! pulled conj card))))
-    (when (empty? @pulled)
-      (println "No cards available to pull.")
-      (when (:json opts) (out-json {:spawned []}))
-      (System/exit 1))
-    ;; Spawn agents for all pulled cards in background
-    (let [procs (doall
-                  (for [card @pulled]
-                    (spawn-agent-bg board card)))]
-      (println (str "Spawned " (clojure.core/count @pulled) " agent(s) in parallel:"))
-      (doseq [p procs]
-        (if (:error p)
-          (println (str "  [FAIL] " (:card-id p) ": " (:title p) " — " (:error p)))
-          (println (str "  [OK]   " (:card-id p) ": " (:title p)
-                        " (worktree: " (:worktree p) ")"))))
-      ;; Wait for all processes to complete
-      (println "\nWaiting for all agents to finish...")
-      (let [results (doall
-                      (for [p procs]
-                        (if (:process p)
-                          (let [result @(:process p)
-                                exit-code (:exit result)]
-                            (assoc p :exit-code exit-code))
-                          p)))]
-        (println "\nAll agents completed:")
-        (doseq [r results]
-          (if (:error r)
-            (println (str "  [FAIL] " (:card-id r) ": " (:error r)))
-            (let [status (if (zero? (:exit-code r -1)) "OK" "FAIL")]
-              (println (str "  [" status "] " (:card-id r) ": " (:title r)
-                            " (exit: " (:exit-code r "n/a") ")"))))))
-      (when (:json opts)
-        (out-json {:spawned (mapv #(select-keys % [:card-id :title :worktree]) @pulled)})))))
+    (let [spawned   (clojure.core/count @pulled)
+          skipped   (- n spawned)]
+      (when (empty? @pulled)
+        (println "No independent cards available to pull.")
+        (when (:json opts)
+          (out-json {:requested n :spawned_count 0 :skipped_count n :spawned []}))
+        (System/exit 1))
+      ;; Report actual vs requested
+      (println (str "Spawned " spawned " of " n " requested"
+                    (when (pos? skipped)
+                      (str " (" skipped " skipped: insufficient independent cards available)"))))
+      ;; Spawn agents for all pulled cards in background
+      (let [procs (doall
+                    (for [card @pulled]
+                      (spawn-agent-bg board card)))]
+        (doseq [p procs]
+          (if (:error p)
+            (println (str "  [FAIL] " (:card-id p) ": " (:title p) " — " (:error p)))
+            (println (str "  [OK]   " (:card-id p) ": " (:title p)
+                          " (worktree: " (:worktree p) ")"))))
+        ;; Wait for all processes to complete
+        (println "\nWaiting for all agents to finish...")
+        (let [results (doall
+                        (for [p procs]
+                          (if (:process p)
+                            (let [result @(:process p)
+                                  exit-code (:exit result)]
+                              (assoc p :exit-code exit-code))
+                            p)))]
+          (println "\nAll agents completed:")
+          (doseq [r results]
+            (if (:error r)
+              (println (str "  [FAIL] " (:card-id r) ": " (:error r)))
+              (let [status (if (zero? (:exit-code r -1)) "OK" "FAIL")]
+                (println (str "  [" status "] " (:card-id r) ": " (:title r)
+                              " (exit: " (:exit-code r "n/a") ")"))))))
+        (when (:json opts)
+          (out-json {:requested     n
+                     :spawned_count spawned
+                     :skipped_count skipped
+                     :spawned       (mapv #(select-keys % [:card-id :title :worktree])
+                                          @pulled)}))))))
 
 (defn cmd-cleanup
   [{:keys [opts]}]
