@@ -649,6 +649,54 @@
   (println "\n== undo cleanup ==")
   (cleanup dir))
 
+;; ── Status filtering ─────────────────────────────────────────────
+
+(let [dir (make-repo)]
+  (println "\n== Status filtering ==")
+
+  (kb dir "init")
+
+  ;; Add cards with different tags and one blocked
+  (kb dir "add" "Card Alpha" "--tags" "bug")
+  (kb dir "add" "Card Beta" "--tags" "feature")
+  (kb dir "add" "Card Gamma" "--tags" "bug")
+
+  ;; Block card 001
+  (kb dir "block" "001" "--reason" "waiting on something")
+
+  ;; --blocked shows only blocked cards
+  (let [r (kb dir "status" "--blocked")]
+    (T "status --blocked exits 0" (:ok r) (:err r))
+    (T "status --blocked shows blocked card" (str/includes? (txt r) "001") (txt r))
+    (T "status --blocked does not show non-blocked card" (not (str/includes? (txt r) "002")) (txt r)))
+
+  ;; --lane backlog shows only backlog section
+  (let [r (kb dir "status" "--lane" "backlog")]
+    (T "status --lane exits 0" (:ok r) (:err r))
+    (T "status --lane shows backlog header" (str/includes? (str/upper-case (txt r)) "BACKLOG") (txt r))
+    (T "status --lane does not show other lanes" (not (str/includes? (str/upper-case (txt r)) "IN-PROGRESS")) (txt r)))
+
+  ;; --tag bug shows only cards with that tag
+  (let [r (kb dir "status" "--tag" "bug")]
+    (T "status --tag exits 0" (:ok r) (:err r))
+    (T "status --tag shows tagged card 001" (str/includes? (txt r) "001") (txt r))
+    (T "status --tag shows tagged card 003" (str/includes? (txt r) "003") (txt r))
+    (T "status --tag does not show untagged card" (not (str/includes? (txt r) "002")) (txt r)))
+
+  ;; --tag nonexistent shows "no matching cards"
+  (let [r (kb dir "status" "--tag" "nonexistent")]
+    (T "status --tag nonexistent exits 0" (:ok r) (:err r))
+    (T "status --tag nonexistent shows no matching cards" (str/includes? (txt r) "no matching cards") (txt r)))
+
+  ;; combined --lane backlog --blocked shows only blocked backlog cards
+  (let [r (kb dir "status" "--lane" "backlog" "--blocked")]
+    (T "status combined exits 0" (:ok r) (:err r))
+    (T "status combined shows blocked card in backlog" (str/includes? (txt r) "001") (txt r))
+    (T "status combined does not show non-blocked card" (not (str/includes? (txt r) "002")) (txt r)))
+
+  (println "\n== Status filtering cleanup ==")
+  (cleanup dir))
+
 ;; ── Summary ────────────────────────────────────────────────────
 
 (println (str "\n" (apply str (repeat 50 "="))))
