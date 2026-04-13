@@ -1384,6 +1384,237 @@
 
         (assoc result :cleaned @cleaned))))))
 
+;; ── Board health check (kb doctor) ───────────────────────────
+
+(def ^:private known-board-keys
+  "Top-level keys that board.yaml is allowed to contain."
+  #{"project" "base_branch" "merge_strategy" "agent_command" "lanes"
+    "context_strategy" "context_budget" "notifications"})
+
+(def ^:private known-lane-keys
+  "Keys allowed inside a lane map."
+  #{"name" "max_wip" "max_parallelism" "instructions"
+    "requires_approval" "approval_timeout" "approval_timeout_action"
+    "heartbeat_timeout" "on_enter"
+    "min_confidence" "gate_from_backlog" "gate_from_plan"
+    "gate_from_in-progress" "gate_from_review" "gate_from_unit-tests"
+    "gate_from_discovery" "gate_from_testing" "gate_from_done"})
+
+(defn- doctor-check-schema
+  "Validate board.yaml: flag unknown top-level and lane keys."
+  [board]
+  (let [config   (:config board)
+        top-keys (set (keys config))
+        unknown  (clojure.set/difference top-keys known-board-keys)
+        lanes    (get config "lanes" [])
+        lane-issues (vec
+                      (for [lane lanes
+                            :let [lk (set (keys lane))
+                                  bad (clojure.set/difference lk known-lane-keys)]
+                            :when (seq bad)]
+                        {:lane (get lane "name" "?") :unknown_keys (vec bad)}))]
+    {:check "schema"
+     :status (if (and (empty? unknown) (empty? lane-issues)) :pass :fail)
+     :unknown_top_keys (vec unknown)
+     :lane_issues lane-issues}))
+
+(defn- doctor-check-worktrees
+  "Every card with a worktree has a matching git worktree dir, and vice versa."
+  [board]
+  (let [all    (all-cards board)
+        known  (into #{} (map :id all))
+        proj   (:project-root board)
+        wt-dir (:worktrees-dir board)
+        ;; Cards claiming a worktree that doesn't exist on disk
+        stale-refs (->> all
+                        (filter #(and (not (str/blank? (:worktree %)))
+                                      (not (u/path-exists? (u/->path (:worktree %))))))
+                        (mapv #(hash-map :id (:id %) :worktree (:worktree %))))
+        ;; Worktree dirs with no matching card
+        orphaned-wts (when (u/path-exists? wt-dir)
+                       (->> (u/list-dirs wt-dir)
+                            (filter (fn [^Path d]
+                                      (not (contains? known (.getName (.toFile d))))))
+                            (mapv (fn [^Path d]
+                                    {:id (.getName (.toFile d)) :path (str d)}))))]
+    {:check "worktrees"
+     :status (if (and (empty? stale-refs) (empty? orphaned-wts)) :pass :fail)
+     :stale_refs stale-refs
+     :orphaned orphaned-wts}))
+
+(defn- doctor-check-branches
+  "Every kb/* branch belongs to an open card; orphaned kb/* branches flagged."
+  [board]
+  (let [all   (all-cards board)
+        known (into #{} (map :id all))
+        proj  (:project-root board)
+        branch-r (git-safe :args ["branch" "--list" "kb/*"] :cwd proj)
+        orphaned (when (= 0 (:exit branch-r))
+                   (->> (str/split-lines (:out branch-r))
+                        (map str/trim)
+                        (map #(str/replace % #"^\* " ""))
+                        (filter #(str/starts-with? % "kb/"))
+                        (keep (fn [branch]
+                                (let [bid (first (str/split (subs branch 3) #"-"))]
+                                  (when-not (contains? known bid)
+                                    {:branch branch :card-id bid}))))
+                        vec))]
+    {:check "branches"
+     :status (if (empty? orphaned) :pass :fail)
+     :orphaned (or orphaned [])}))
+
+(defn- doctor-check-heartbeats
+  "Flag cards with last_heartbeat older than 1 hour (default threshold)."
+  [board]
+  (let [now      (u/now-epoch)
+        all      (all-cards board)
+        threshold 3600 ;; 1 hour
+        stale (->> all
+                   (filter #(and (:last-heartbeat %)
+                                 (> (- now (:last-heartbeat %)) threshold)))
+                   (mapv #(hash-map :id (:id %)
+                                    :title (:title %)
+                                    :lane (:lane %)
+                                    :last_heartbeat (:last-heartbeat %)
+                                    :age_seconds (int (- now (:last-heartbeat %))))))]
+    {:check "heartbeats"
+     :status (if (empty? stale) :pass :fail)
+     :threshold_seconds threshold
+     :stale stale}))
+
+(defn- doctor-check-dependencies
+  "No cycles in depends_on; all deps reference existing cards."
+  [board]
+  (let [all    (all-cards board)
+        known  (into #{} (map :id all))
+        ;; Missing dep references
+        missing (vec
+                  (for [card all
+                        dep (:depends-on card)
+                        :when (not (contains? known dep))]
+                    {:id (:id card) :missing_dep dep}))
+        ;; Cycle detection via DFS
+        dep-map (into {} (map (fn [c] [(:id c) (:depends-on c)]) all))
+        visited (atom #{})
+        stack   (atom #{})
+        cycles  (atom [])
+        cycle-path (atom [])]
+    (letfn [(dfs [node path]
+              (when (not (@visited node))
+                (swap! stack conj node)
+                (swap! cycle-path conj node)
+                (doseq [dep (get dep-map node [])]
+                  (cond
+                    (@stack dep)
+                    (swap! cycles conj (conj (drop-while #(not= % dep) @cycle-path) dep))
+                    (not (@visited dep))
+                    (dfs dep (conj path node))))
+                (swap! stack disj node)
+                (swap! cycle-path pop)
+                (swap! visited conj node)))]
+      (doseq [card all] (dfs (:id card) [])))
+    {:check "dependencies"
+     :status (if (and (empty? missing) (empty? @cycles)) :pass :fail)
+     :missing_refs missing
+     :cycles (vec @cycles)}))
+
+(defn- doctor-check-history
+  "No malformed JSONL lines; timestamps monotonic."
+  [board]
+  (let [all (all-cards board)
+        issues (atom [])]
+    (doseq [card all]
+      (try
+        (let [d    (find-card-dir board (:id card))
+              hist (u/path-resolve d "history.jsonl")]
+          (when (u/path-exists? hist)
+            (let [lines (str/split-lines (slurp (str hist)))]
+              (doseq [[idx line] (map-indexed vector lines)]
+                (when-not (str/blank? line)
+                  (try
+                    (let [parsed (json/parse-string line false)]
+                      (when-not (map? parsed)
+                        (swap! issues conj {:id (:id card) :line (inc idx) :error "not a JSON object"})))
+                    (catch Exception _
+                      (swap! issues conj {:id (:id card) :line (inc idx) :error "malformed JSON"})))))
+              ;; Check monotonic timestamps
+              (let [entries (try (load-history board (:id card)) (catch Exception _ []))]
+                (doseq [[i e] (map-indexed vector (partition 2 1 entries))]
+                  (when (> (:ts (first e)) (:ts (second e)))
+                    (swap! issues conj {:id (:id card) :line nil
+                                        :error (str "non-monotonic timestamp at entry " (inc i))})))))))
+        (catch Exception e
+          (swap! issues conj {:id (:id card) :error (.getMessage e)}))))
+    {:check "history"
+     :status (if (empty? @issues) :pass :fail)
+     :issues (vec @issues)}))
+
+(defn- doctor-check-lanes
+  "Every card's lane is defined in board.yaml."
+  [board]
+  (let [all        (all-cards board)
+        lane-names  (set (lane-names board))
+        bad-lane    (->> all
+                         (filter #(not (contains? lane-names (:lane %))))
+                         (mapv #(hash-map :id (:id %) :lane (:lane %))))]
+    {:check "lanes"
+     :status (if (empty? bad-lane) :pass :fail)
+     :invalid_lane bad-lane}))
+
+(defn- doctor-check-hooks
+  "Every configured hook command exists (basic which check)."
+  [board]
+  (let [hooks (get-in (:config board) ["notifications" "hooks"] [])
+        issues (vec
+                 (for [h hooks
+                       :let [cmd (get h "command" "")]
+                       :when (not (str/blank? cmd))
+                       :let [;; Extract the binary name (first word before space or {)
+                             bin (first (str/split cmd #"\s+|\{"))]
+                       :when (not (str/blank? bin))
+                       :let [r (git-safe :args ["which" bin])]]
+                   (when-not (= 0 (:exit r))
+                     {:hook (get h "event" "?") :command cmd :missing bin})))]
+    {:check "hooks"
+     :status (if (empty? (filter some? issues)) :pass :fail)
+     :issues (vec (filter some? issues))}))
+
+(defn doctor!
+  "Run all health checks on the board. Returns a map with :checks, :pass, :fail, :fixed.
+   With :fix true, applies safe auto-fixes."
+  [board & {:keys [fix] :or {fix false}}]
+  (let [checks [(doctor-check-schema board)
+                (doctor-check-worktrees board)
+                (doctor-check-branches board)
+                (doctor-check-heartbeats board)
+                (doctor-check-dependencies board)
+                (doctor-check-history board)
+                (doctor-check-lanes board)
+                (doctor-check-hooks board)]
+        pass-c  (count (filter #(= :pass (:status %)) checks))
+        fail-c  (count (filter #(= :fail (:status %)) checks))
+        fixed   (atom [])]
+    (when fix
+      ;; Safe auto-fix: prune orphaned worktree dirs
+      (let [wt-check (first (filter #(= "worktrees" (:check %)) checks))]
+        (doseq [wt (:orphaned wt-check)]
+          (let [r (git-safe :args ["worktree" "remove" (:path wt) "--force"]
+                            :cwd (:project-root board))]
+            (when (= 0 (:exit r))
+              (swap! fixed conj (str "Removed orphaned worktree: " (:id wt)))))))
+      ;; Safe auto-fix: prune orphaned branches
+      (let [br-check (first (filter #(= "branches" (:check %)) checks))]
+        (doseq [ob (:orphaned br-check)]
+          (let [r (git-safe :args ["branch" "-D" (:branch ob)]
+                            :cwd (:project-root board))]
+            (if (= 0 (:exit r))
+              (swap! fixed conj (str "Deleted orphaned branch: " (:branch ob)))
+              (swap! fixed conj (str "Failed to delete branch " (:branch ob))))))))
+    {:checks checks
+     :pass pass-c
+     :fail fail-c
+     :fixed (vec @fixed)}))
+
 ;; ── Gate introspection ─────────────────────────────────────────
 
 (defn gates-for-card

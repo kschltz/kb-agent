@@ -723,6 +723,48 @@
   (println "\n== Context rejection warning cleanup ==")
   (cleanup dir))
 
+;; ── kb doctor ──────────────────────────────────────────────────────
+
+(let [dir (make-repo)]
+
+  (println "\n== kb doctor ==")
+  (let [r (kb dir "init")]
+    (T "doctor: init exits 0" (:ok r) "init failed"))
+
+  ;; Fresh board: all checks should pass
+  (let [r (kb dir "doctor")]
+    (T "doctor: exits 0 on clean board" (:ok r) (str "doctor failed on clean board: " (txt r)))
+    (T "doctor: all pass on clean board" (str/includes? (txt r) "8 passed, 0 failed") (txt r)))
+
+  ;; --json output
+  (let [r (kb dir "doctor" "--json")]
+    (T "doctor: --json exits 0" (:ok r) (str "doctor --json failed: " (:err r)))
+    (let [output (txt r)]
+      (T "doctor: --json has checks key" (str/includes? output "\"checks\"") "missing checks key")
+      (T "doctor: --json has pass key" (str/includes? output "\"pass\"") "missing pass key")
+      (T "doctor: --json has fail key" (str/includes? output "\"fail\"") "missing fail key")))
+
+  ;; Add a card and create a deliberate issue: card in unknown lane
+  (kb dir "add" "Doctor test card")
+  ;; Manually move card's lane to something invalid
+  (let [board-yaml (str dir "/.kanban/board.yaml")
+        meta-yaml  (str dir "/.kanban/cards/001-doctor-test-card/meta.yaml")]
+    ;; Edit card meta to have an invalid lane
+    (let [content (slurp meta-yaml)]
+      (spit meta-yaml (str/replace content "lane: backlog" "lane: nonexistent_lane")))
+    (let [r (kb dir "doctor")]
+      (T "doctor: detects unknown lane" (str/includes? (txt r) "FAIL") (str "should detect unknown lane: " (txt r))))
+    ;; Fix: restore lane
+    (let [content (slurp meta-yaml)]
+      (spit meta-yaml (str/replace content "lane: nonexistent_lane" "lane: backlog"))))
+
+  ;; Fresh board --fix should work (nothing to fix, but no error)
+  (let [r (kb dir "doctor" "--fix")]
+    (T "doctor: --fix exits 0 on clean board" (:ok r) (str "doctor --fix failed: " (txt r))))
+
+  (println "\n== doctor cleanup ==")
+  (cleanup dir))
+
 ;; ── Summary ────────────────────────────────────────────────────
 
 (println (str "\n" (apply str (repeat 50 "="))))

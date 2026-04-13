@@ -786,6 +786,70 @@
                 (when (seq orphaned-branches)
                   (println "  Run with --clean --delete-branches to also delete orphaned branches."))))))))))
 
+(defn cmd-doctor
+  [{:keys [opts]}]
+  (let [board  (b/make-board)
+        result (b/doctor! board :fix (boolean (:fix opts)))]
+    (if (:json opts)
+      (out-json result)
+      (let [checks (:checks result)
+            pass-c (:pass result)
+            fail-c (:fail result)
+            fixed  (:fixed result)]
+        (println "kb doctor — board health check")
+        (println (apply str (repeat 40 "=")))
+        (doseq [c checks]
+          (let [status-icon (if (= :pass (:status c)) "\u2713" "\u2717")
+                status-label (if (= :pass (:status c)) "PASS" "FAIL")]
+            (println (str "  " status-icon " " (:check c) ": " status-label))
+            ;; Show details for failures
+            (when (= :fail (:status c))
+              (condp = (:check c)
+                "schema"
+                (do
+                  (when (seq (:unknown_top_keys c))
+                    (println (str "    Unknown top-level keys: " (str/join ", " (:unknown_top_keys c)))))
+                  (doseq [li (:lane_issues c)]
+                    (println (str "    Lane '" (:lane li) "': unknown keys " (str/join ", " (:unknown_keys li))))))
+                "worktrees"
+                (do
+                  (doseq [sr (:stale_refs c)]
+                    (println (str "    Card " (:id sr) ": worktree not found: " (:worktree sr))))
+                  (doseq [ow (:orphaned c)]
+                    (println (str "    Orphaned worktree dir: " (:id ow) " (" (:path ow) ")"))))
+                "branches"
+                (doseq [ob (:orphaned c)]
+                  (println (str "    Orphaned branch: " (:branch ob) " (card " (:card-id ob) ")")))
+                "heartbeats"
+                (doseq [s (:stale c)]
+                  (println (str "    Card " (:id s) " [" (:lane s) "]: last heartbeat "
+                                (int (/ (:age_seconds s) 60)) " min ago")))
+                "dependencies"
+                (do
+                  (doseq [m (:missing_refs c)]
+                    (println (str "    Card " (:id m) " depends on missing card " (:missing_dep m))))
+                  (doseq [cy (:cycles c)]
+                    (println (str "    Cycle detected: " (str/join " -> " cy)))))
+                "history"
+                (doseq [iss (:issues c)]
+                  (println (str "    Card " (:id iss) (when (:line iss) (str " line " (:line iss)))
+                                ": " (:error iss))))
+                "lanes"
+                (doseq [bl (:invalid_lane c)]
+                  (println (str "    Card " (:id bl) " in unknown lane: " (:lane bl))))
+                "hooks"
+                (doseq [hi (:issues c)]
+                  (println (str "    Hook '" (:hook hi) "': command '" (:command hi)
+                                "' — binary '" (:missing hi) "' not found")))
+                nil))))
+        (when (seq fixed)
+          (println (str "\n  Fixed (" (count fixed) "):"))
+          (doseq [f fixed]
+            (println (str "    " f))))
+        (println (str "\n  " pass-c " passed, " fail-c " failed"))))
+    (when (pos? (:fail result))
+      (System/exit 1))))
+
 (defn cmd-serve
   [{:keys [opts]}]
   (require '[kb.server :as srv])
@@ -1047,6 +1111,7 @@
       (println "  serve    [--host 127.0.0.1] [--port 8741]  Start web UI server")
       (println "  split    <card-id> <title1> [title2...]  Split card into child cards")
       (println "  recover  [opts]                         Detect and clean orphaned resources")
+      (println "  doctor   [opts]                         Board health check (--fix to auto-fix)")
       (println)
       (println "Use `kb help --agent` for agent-friendly workflow instructions.")
       (System/exit 0))))
@@ -1124,6 +1189,8 @@
    {:cmds ["deps"] :fn cmd-deps :args->opts [:card-id]}
    {:cmds ["serve"] :fn cmd-serve}
    {:cmds ["recover"] :fn cmd-recover}
+   {:cmds ["doctor"] :fn cmd-doctor
+    :opts {:fix {:desc "Auto-fix safe issues" :type :bool}}}
    {:cmds ["whoami"] :fn cmd-whoami}
    {:cmds ["help"] :fn cmd-help}
    {:cmds [] :fn cmd-help}])
