@@ -525,6 +525,40 @@
   (println "\n== whoami cleanup ==")
   (cleanup dir))
 
+;; ── Dependency-aware spawn-parallel ───────────────────────────
+
+(let [dir (make-repo)]
+
+  (println "\n== spawn-parallel dep-awareness ==")
+  (kb dir "init")
+
+  ;; Create chain A→B→C: only A has satisfied deps
+  (kb dir "add" "Chain A")                         ;; 001, no deps
+  (kb dir "add" "Chain B")                         ;; 002
+  (kb dir "add" "Chain C")                         ;; 003
+  (kb dir "link" "002" "001")                      ;; B depends on A
+  (kb dir "link" "003" "002")                      ;; C depends on B
+
+  ;; spawn-parallel --count 3 with no agent_command configured exits non-zero,
+  ;; so just test the pull selection directly via kb pull loop
+  (let [r1 (kb dir "pull" "--agent" "test-agent")]
+    (T "spawn-parallel deps: first pull gets A (no deps)" (str/includes? (txt r1) "001") (txt r1)))
+
+  ;; B and C should NOT be available (A is in-progress, not done)
+  (let [r2 (kb dir "pull" "--agent" "test-agent")]
+    (T "spawn-parallel deps: no more independent cards" (not (:ok r2)) (txt r2)))
+
+  ;; Verify B is still in backlog (not pulled)
+  (let [s (kb dir "show" "002")]
+    (T "spawn-parallel deps: B remains in backlog" (str/includes? (txt s) "Lane:     backlog") (txt s)))
+
+  ;; Verify C is still in backlog
+  (let [s (kb dir "show" "003")]
+    (T "spawn-parallel deps: C remains in backlog" (str/includes? (txt s) "Lane:     backlog") (txt s)))
+
+  (println "\n== spawn-parallel dep-awareness cleanup ==")
+  (cleanup dir))
+
 ;; ── Priority-aware kb pull ─────────────────────────────────────
 
 (let [dir (make-repo)]
