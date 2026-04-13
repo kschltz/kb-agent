@@ -1674,6 +1674,30 @@
           last-gfail   (->> history
                             (filter #(= "gate_fail" (:action %)))
                             last)
+          ;; Rejection warning: surface if card was rejected and then re-entered the current lane
+          ;; Find the most recent lane-entry event and the rejection that preceded it (if any)
+          all-lane-entries (->> history
+                                (filter #(contains? #{"moved" "created"} (:action %))))
+          last-lane-entry  (last all-lane-entries)
+          prev-lane-entry  (last (butlast all-lane-entries))
+          ;; Find rejection that happened after the previous entry but before the current entry
+          prev-lane-ts     (or (and prev-lane-entry (:ts prev-lane-entry)) 0)
+          cur-lane-ts      (or (and last-lane-entry (:ts last-lane-entry)) 0)
+          last-rejected    (->> history
+                                (filter #(and (= "rejected" (:action %))
+                                              (> (:ts %) prev-lane-ts)
+                                              (< (:ts %) cur-lane-ts)))
+                                last)
+          rejection-warning-lines
+          (when (and last-rejected last-lane-entry)
+            ["## ⚠️ Previous attempt rejected"
+             ""
+             (str "Reason: " (:content last-rejected ""))
+             (str "At: " (u/fmt-time (:ts last-rejected)))
+             (str "By: " (if (str/blank? (:agent-id last-rejected ""))
+                           "human"
+                           (:agent-id last-rejected)))
+             ""])
           board-summary (->> (lane-names board)
                              (mapv (fn [ln]
                                      (let [lc (count (filter #(= (:lane %) ln) all-cards-raw))]
@@ -1862,7 +1886,10 @@
                           (trim-to-budget lines budget)
                           lines)]
         (str/join "\n"
-                  (into final-lines
+                  (into (into final-lines
+                              ;; Rejection warning is immune to budget trimming — always appended after trim
+                              (when (not (or (:gates-only opts) (:deps-only opts)))
+                                rejection-warning-lines))
                          ["## Instructions"
                           ""
                           "You are working on this card. Your working directory is the git worktree for this card."
