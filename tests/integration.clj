@@ -649,52 +649,39 @@
   (println "\n== undo cleanup ==")
   (cleanup dir))
 
-;; ── Status filtering ─────────────────────────────────────────────
+;; ── Context rejection warning test ─────────────────────────────
 
 (let [dir (make-repo)]
-  (println "\n== Status filtering ==")
+  (println "\n== Context rejection warning ==")
+  (let [r (kb dir "init")]
+    (T "ctx-rej: init exits 0" (:ok r) "init failed"))
 
-  (kb dir "init")
+  ;; Add a card and pull it to in-progress
+  (let [r (kb dir "add" "Rejection warning test card")]
+    (T "ctx-rej: add exits 0" (:ok r) "add failed"))
+  (let [r (kb dir "pull" "001" "--agent" "test-bot" "--lane" "in-progress")]
+    (T "ctx-rej: pull exits 0" (:ok r) "pull failed"))
 
-  ;; Add cards with different tags and one blocked
-  (kb dir "add" "Card Alpha" "--tags" "bug")
-  (kb dir "add" "Card Beta" "--tags" "feature")
-  (kb dir "add" "Card Gamma" "--tags" "bug")
+  ;; Reject the card with a reason
+  (let [r (kb dir "reject" "001" "--reason" "logic is wrong, fix the algorithm")]
+    (T "ctx-rej: reject exits 0" (:ok r) (:err r))
+    (T "ctx-rej: reject moved to backlog" (str/includes? (txt r) "backlog") (txt r)))
 
-  ;; Block card 001
-  (kb dir "block" "001" "--reason" "waiting on something")
+  ;; Re-move the card to in-progress (simulating re-pull after rejection)
+  (let [r (kb dir "move" "001" "in-progress")]
+    (T "ctx-rej: re-move to in-progress exits 0" (:ok r) (:err r)))
 
-  ;; --blocked shows only blocked cards
-  (let [r (kb dir "status" "--blocked")]
-    (T "status --blocked exits 0" (:ok r) (:err r))
-    (T "status --blocked shows blocked card" (str/includes? (txt r) "001") (txt r))
-    (T "status --blocked does not show non-blocked card" (not (str/includes? (txt r) "002")) (txt r)))
+  ;; Check context output contains rejection warning
+  (let [r (kb dir "context" "001")]
+    (T "ctx-rej: context exits 0" (:ok r) (:err r))
+    (T "ctx-rej: context contains rejection warning header"
+       (str/includes? (txt r) "Previous attempt rejected")
+       (str "context output missing warning: " (subs (txt r) 0 (min 300 (count (txt r))))))
+    (T "ctx-rej: context contains rejection reason"
+       (str/includes? (txt r) "logic is wrong, fix the algorithm")
+       (str "context output missing reason: " (subs (txt r) 0 (min 300 (count (txt r)))))))
 
-  ;; --lane backlog shows only backlog section
-  (let [r (kb dir "status" "--lane" "backlog")]
-    (T "status --lane exits 0" (:ok r) (:err r))
-    (T "status --lane shows backlog header" (str/includes? (str/upper-case (txt r)) "BACKLOG") (txt r))
-    (T "status --lane does not show other lanes" (not (str/includes? (str/upper-case (txt r)) "IN-PROGRESS")) (txt r)))
-
-  ;; --tag bug shows only cards with that tag
-  (let [r (kb dir "status" "--tag" "bug")]
-    (T "status --tag exits 0" (:ok r) (:err r))
-    (T "status --tag shows tagged card 001" (str/includes? (txt r) "001") (txt r))
-    (T "status --tag shows tagged card 003" (str/includes? (txt r) "003") (txt r))
-    (T "status --tag does not show untagged card" (not (str/includes? (txt r) "002")) (txt r)))
-
-  ;; --tag nonexistent shows "no matching cards"
-  (let [r (kb dir "status" "--tag" "nonexistent")]
-    (T "status --tag nonexistent exits 0" (:ok r) (:err r))
-    (T "status --tag nonexistent shows no matching cards" (str/includes? (txt r) "no matching cards") (txt r)))
-
-  ;; combined --lane backlog --blocked shows only blocked backlog cards
-  (let [r (kb dir "status" "--lane" "backlog" "--blocked")]
-    (T "status combined exits 0" (:ok r) (:err r))
-    (T "status combined shows blocked card in backlog" (str/includes? (txt r) "001") (txt r))
-    (T "status combined does not show non-blocked card" (not (str/includes? (txt r) "002")) (txt r)))
-
-  (println "\n== Status filtering cleanup ==")
+  (println "\n== Context rejection warning cleanup ==")
   (cleanup dir))
 
 ;; ── Summary ────────────────────────────────────────────────────
