@@ -91,12 +91,18 @@ kb serve                             # open web UI
 | `kb show <card>` | Full card details: meta + history + diff stats |
 | `kb gates <card>` | Show gates for the next lane transition |
 | `kb edit <card> [--title ...] [--priority N] [--desc ...]` | Edit card fields |
-| `kb heartbeat <card>` | Record an agent heartbeat (signal you're alive) |
-| `kb status` | Print the board |
+| `kb heartbeat <card> [--doing "text"] [--progress 0.0-1.0]` | Record agent heartbeat; optionally surface current activity and progress |
+| `kb whoami [--json] [--export]` | Identify current card from working directory (agents: use inside a worktree) |
+| `kb assign-reviewer <card> <reviewer>` | Set the reviewer field on a card (use `""` to clear) |
+| `kb split <card> "title1" "title2" ...` | Split a card into child cards; parent is blocked until all children reach done |
+| `kb link <card> <dep>` | Add a dependency (card will not be available until dep reaches done) |
+| `kb unlink <card> <dep>` | Remove a dependency |
+| `kb status` | Print the board (children indented under their parent) |
 | `kb context <card>` | Output card context for agent system prompt |
 | `kb spawn <card>` | Start a sub-agent scoped to this card |
 | `kb cleanup <card>` | Remove worktree, optionally delete branch |
 | `kb recover [--clean]` | Detect and clean orphaned worktrees |
+| `kb watch` | Poll for stale heartbeats and expired approvals |
 | `kb serve [--port 8741]` | Start web UI |
 
 All commands accept `--json`. Mutating commands accept `--agent <id>`.
@@ -122,6 +128,7 @@ lanes:
     instructions: "Implement the solution. Write code, make changes, iterate."
 
   - name: review
+    role: review           # auto-clears reviewer field on card entry
     max_wip: 3
     gate_from_in-progress:
       - "cd $KB_WORKTREE && npm test"
@@ -165,12 +172,29 @@ kb serve [--port 8741]
 
 Auto-opens the browser. Serves a live board view at `http://localhost:8741` with:
 
-- Drag-and-drop card transitions (runs gates server-side)
+- Drag-and-drop card transitions (runs gates server-side) — drag handle (⠿) separate from click-to-open
 - Card detail panel with conversation history and diff viewer
 - Real-time updates via WebSocket
 - Add cards, notes, block/unblock from the browser
 - Lane management: add, rename, reorder (drag), and delete lanes
-- Lane instructions displayed under each lane header
+- Lane instructions displayed under each lane header (collapsible)
+- **Activity feed** tab: cross-card event timeline with time-range and action filters
+- Card badges: assignee, reviewer (R:), branch, heartbeat status, doing/progress, confidence, parent (⊂)
+
+## Card Fields
+
+| Field | Description |
+|---|---|
+| `assigned_agent` | Agent currently working the card |
+| `reviewer` | Agent or human assigned to review; set with `kb assign-reviewer`; auto-cleared on entering a `role: review` lane |
+| `parent_id` | Parent card ID (set by `kb split`); parent is auto-blocked while children are open |
+| `priority` | Integer; higher = higher priority (default 0) |
+| `confidence` | 0–100; can gate lane transitions via `min_confidence` in lane config |
+| `tags` | Free-form list; shown on cards, filterable |
+| `depends_on` | List of card IDs that must reach done before this card is available to `kb pull` |
+| `last_heartbeat` | Epoch of last agent heartbeat |
+| `last_heartbeat_doing` | Activity description from `kb heartbeat --doing` |
+| `last_heartbeat_progress` | 0.0–1.0 from `kb heartbeat --progress` |
 
 ## How It Works
 
