@@ -410,61 +410,89 @@
             (println (str "    ... (" (- (count history) 15) " earlier entries)"))))
         (println)))))
 
+(defn- card-matches-filters? [card opts]
+  (let [lane-f    (:lane opts)
+        tag-f     (:tag opts)
+        agent-f   (:agent opts)
+        blocked-f (:blocked opts)]
+    (and (or (nil? lane-f)    (= (:lane card) lane-f))
+         (or (nil? tag-f)     (some #{tag-f} (:tags card)))
+         (or (nil? agent-f)   (= (:assigned-agent card) agent-f))
+         (or (not blocked-f)  (:blocked card)))))
+
 (defn cmd-status
   [{:keys [opts]}]
-  (let [board (b/make-board)
-        cards (b/all-cards board)]
+  (let [board      (b/make-board)
+        cards      (b/all-cards board)
+        filtering? (or (:lane opts) (:tag opts) (:agent opts) (:blocked opts))
+        lane-confs (if (:lane opts)
+                     (filterv #(= (get % "name") (:lane opts)) (b/lanes board))
+                     (b/lanes board))]
     (if (:json opts)
       (let [result (reduce (fn [acc lane-name]
                              (assoc acc lane-name
-                                    (filterv #(= (:lane %) lane-name) cards)))
+                                    (filterv #(and (= (:lane %) lane-name)
+                                                   (card-matches-filters? % opts))
+                                             cards)))
                            {}
-                           (b/lane-names board))]
+                           (map #(get % "name") lane-confs))
+            result (cond-> result
+                     filtering? (assoc "filters"
+                                       (into {} (filter val {:lane    (:lane opts)
+                                                             :tag     (:tag opts)
+                                                             :agent   (:agent opts)
+                                                             :blocked (:blocked opts)}))))]
         (out-json result))
       (do
         (println)
         (println (str "  " (get (:config board) "project" "kb")
                       " \u2014 " (b/base-branch board)))
         (println)
-        (doseq [lane-conf (b/lanes board)]
-          (let [name (get lane-conf "name")
-                lane-cards (sort-by (juxt :priority :created-at)
-                                    (filterv #(= (:lane %) name) cards))
-                max-wip (get lane-conf "max_wip" "\u221e")
-                max-par (get lane-conf "max_parallelism" "\u221e")
-                header (str "\u2500\u2500 " (str/upper-case name)
-                            " (" (count lane-cards) "/" max-wip ")"
-                            " [par: " max-par "] ")]
-            (println (str header (apply str (repeat (max 0 (- 60 (count header))) "\u2500"))))
-            (if (empty? lane-cards)
-              (println "  (empty)")
-              (let [conf-cfg (b/confidence-config board)
-                    ;; Only show top-level cards (not children) at top level
-                    top-level (filterv #(nil? (:parent-id %)) lane-cards)]
-                (doseq [c top-level]
-                  (let [flags (cond-> []
-                                (:blocked c) (conj "BLOCKED")
-                                (:pending-approval c) (conj "PENDING APPROVAL")
-                                (and (:pending-question c) (not (str/blank? (:pending-question c)))) (conj "QUESTION")
-                                (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
-                                (not (str/blank? (:reviewer c ""))) (conj (str "R: " (:reviewer c)))
-                                (not (str/blank? (:branch c ""))) (conj (:branch c))
-                                (and (:confidence c) (:display conf-cfg)) (conj (str "C:" (int (:confidence c)) "%"))
-                                (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c))))
-                                (not (str/blank? (:last-heartbeat-doing c "")))
-                                (conj (str "doing: " (:last-heartbeat-doing c)
-                                           (when (:last-heartbeat-progress c)
-                                             (str " " (int (* 100 (:last-heartbeat-progress c))) "%")))))
-                        flag-str (if (seq flags)
-                                   (str "  (" (str/join ", " flags) ")")
-                                   "")]
-                    (println (str "  [" (:id c) "] " (:title c) flag-str))
-                    ;; Show children indented
-                    (doseq [child (b/children-of board (:id c))]
-                      (println (str "    \u2514\u2500 [" (:id child) "] " (:title child)
-                                    " (" (:lane child) ")"
-                                    (when (:blocked child) " BLOCKED"))))))))
-            (println)))))))
+        (let [any-shown? (volatile! false)]
+          (doseq [lane-conf lane-confs]
+            (let [lname      (get lane-conf "name")
+                  lane-cards (sort-by (juxt :priority :created-at)
+                                      (filterv #(and (= (:lane %) lname)
+                                                     (card-matches-filters? % opts))
+                                               cards))
+                  max-wip    (get lane-conf "max_wip" "\u221e")
+                  max-par    (get lane-conf "max_parallelism" "\u221e")
+                  header     (str "\u2500\u2500 " (str/upper-case lname)
+                                  " (" (count lane-cards) "/" max-wip ")"
+                                  " [par: " max-par "] ")]
+              (when (or (seq lane-cards) (not filtering?))
+                (vreset! any-shown? true)
+                (println (str header (apply str (repeat (max 0 (- 60 (count header))) "\u2500"))))
+                (if (empty? lane-cards)
+                  (println "  (empty)")
+                  (let [conf-cfg   (b/confidence-config board)
+                        top-level  (filterv #(nil? (:parent-id %)) lane-cards)]
+                    (doseq [c top-level]
+                      (let [flags (cond-> []
+                                    (:blocked c) (conj "BLOCKED")
+                                    (:pending-approval c) (conj "PENDING APPROVAL")
+                                    (and (:pending-question c) (not (str/blank? (:pending-question c)))) (conj "QUESTION")
+                                    (not (str/blank? (:assigned-agent c ""))) (conj (str "\u2192 " (:assigned-agent c)))
+                                    (not (str/blank? (:reviewer c ""))) (conj (str "R: " (:reviewer c)))
+                                    (not (str/blank? (:branch c ""))) (conj (:branch c))
+                                    (and (:confidence c) (:display conf-cfg)) (conj (str "C:" (int (:confidence c)) "%"))
+                                    (seq (:tags c)) (conj (str/join " " (map #(str "#" %) (:tags c))))
+                                    (not (str/blank? (:last-heartbeat-doing c "")))
+                                    (conj (str "doing: " (:last-heartbeat-doing c)
+                                               (when (:last-heartbeat-progress c)
+                                                 (str " " (int (* 100 (:last-heartbeat-progress c))) "%")))))
+                            flag-str (if (seq flags)
+                                       (str "  (" (str/join ", " flags) ")")
+                                       "")]
+                        (println (str "  [" (:id c) "] " (:title c) flag-str))
+                        ;; Show children indented
+                        (doseq [child (b/children-of board (:id c))]
+                          (println (str "    \u2514\u2500 [" (:id child) "] " (:title child)
+                                        " (" (:lane child) ")"
+                                        (when (:blocked child) " BLOCKED"))))))))
+                (println))))
+          (when (and filtering? (not @any-shown?))
+            (println "  no matching cards")))))))
 
 (defn cmd-split
   [{:keys [opts]}]
@@ -1058,7 +1086,11 @@
            :agent    {:desc "Agent ID" :type :string}}}
    {:cmds ["assign-reviewer"] :fn cmd-assign-reviewer :args->opts [:card-id :reviewer]}
    {:cmds ["watch"] :fn cmd-watch}
-   {:cmds ["status"] :fn cmd-status}
+   {:cmds ["status"] :fn cmd-status
+    :opts {:lane    {:desc "Filter by lane name" :type :string}
+           :tag     {:desc "Filter by tag" :type :string}
+           :agent   {:desc "Filter by assigned agent" :type :string}
+           :blocked {:desc "Show only blocked cards" :type :bool}}}
    {:cmds ["context"] :fn cmd-context :args->opts [:card-id]
     :opts {:compact {:desc "Permanently compress older history entries"
                      :type :bool}
