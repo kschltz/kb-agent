@@ -796,15 +796,16 @@
       card)))
 
 (defn- find-available-card
-  "Find the first unblocked, unassigned card across all lanes,
-   preferring lanes earlier in the workflow (lower index).
-   Cards in the final lane (done) are excluded.
-   Cards with unsatisfied dependencies are excluded."
+  "Find the highest-priority unblocked, unassigned card.
+   Sort order: lane index ASC (earlier lanes first), priority DESC (higher first),
+   created-at ASC (FIFO tiebreak within same priority).
+   Cards in the final lane (done) and cards with unsatisfied dependencies are excluded."
   [board]
   (let [final-lane (last (lane-names board))
         all        (all-cards board)]
     (first (sort-by (juxt #(.indexOf (lane-names board) (:lane %))
-                          :priority :created-at)
+                          #(- (:priority % 0))
+                          :created-at)
                     (filter #(and (not= (:lane %) final-lane)
                                   (not (:blocked %))
                                   (str/blank? (:assigned-agent %))
