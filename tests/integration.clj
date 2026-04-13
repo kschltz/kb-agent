@@ -525,6 +525,68 @@
   (println "\n== whoami cleanup ==")
   (cleanup dir))
 
+;; ── kb undo / kb trash ─────────────────────────────────────────
+
+(let [dir (make-repo)]
+
+  (println "\n== undo / trash ==")
+  (kb dir "init")
+  (kb dir "add" "Undo test card")
+  ;; Pull without positional card-id so --lane flag is parsed correctly
+  (kb dir "pull" "--agent" "test-bot" "--lane" "in-progress")
+
+  ;; Reject card and verify it moves back to backlog
+  (let [r (kb dir "reject" "001" "--reason" "test rejection")]
+    (T "undo: reject exits 0" (:ok r) (:err r)))
+
+  (let [s (kb dir "show" "001")]
+    (T "undo: card in backlog after reject" (str/includes? (txt s) "Lane:     backlog") (txt s)))
+
+  ;; Trash list should have one entry
+  (let [r (kb dir "trash" "list")]
+    (T "undo: trash list exits 0" (:ok r) (:err r))
+    (T "undo: trash list shows reject entry" (str/includes? (txt r) "reject") (txt r)))
+
+  ;; kb undo restores card to in-progress
+  (let [r (kb dir "undo")]
+    (T "undo: exits 0" (:ok r) (:err r))
+    (T "undo: reports restored" (str/includes? (txt r) "Undone") (txt r)))
+
+  (let [s (kb dir "show" "001")]
+    (T "undo: card restored to in-progress" (str/includes? (txt s) "Lane:     in-progress") (txt s)))
+
+  ;; Trash list should now be empty after undo consumed the entry
+  (let [r (kb dir "trash" "list")]
+    (T "undo: trash list empty after undo" (str/includes? (txt r) "empty") (txt r)))
+
+  ;; Test cleanup: snapshots card, undo restores worktree field
+  (kb dir "cleanup" "001")
+  (let [r (kb dir "undo")]
+    (T "undo: cleanup undo exits 0" (:ok r) (:err r))
+    (T "undo: cleanup undo reports restored" (str/includes? (txt r) "Undone") (txt r)))
+
+  ;; Test trash purge with 9999 days — nothing to purge, but command should work
+  (kb dir "reject" "001" "--reason" "purge test")
+  (let [r (kb dir "trash" "purge" "--days" "9999")]
+    (T "undo: trash purge exits 0" (:ok r) (:err r))
+    (T "undo: trash purge reports count" (str/includes? (txt r) "Purged") (txt r)))
+
+  ;; Recent entry survives the 9999-day purge
+  (let [r (kb dir "trash" "list")]
+    (T "undo: trash still has entry after 9999d purge" (str/includes? (txt r) "reject") (txt r)))
+
+  ;; --json flag
+  (let [r (kb dir "undo" "--json")]
+    (T "undo: --json exits 0" (:ok r) (:err r))
+    (T "undo: --json has restored field" (str/includes? (txt r) "restored") (txt r)))
+
+  ;; Board should have nothing to undo now
+  (let [r (kb dir "undo")]
+    (T "undo: nothing to undo" (str/includes? (txt r) "Nothing") (txt r)))
+
+  (println "\n== undo cleanup ==")
+  (cleanup dir))
+
 ;; ── Summary ────────────────────────────────────────────────────
 
 (println (str "\n" (apply str (repeat 50 "="))))
