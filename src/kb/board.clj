@@ -1907,6 +1907,75 @@
                           "If you are unsure about something, use `kb ask` to ask the human."
                           "When you believe the task is complete and tests pass, use `kb advance` to move forward."])))))))
 
+(defn get-context-data
+  "Return structured context data as a map (for --json output).
+   Accepts same opts as get-context:
+     :since      - only include history after this epoch timestamp
+     :strategy   - :full (default), :recent (last 10), :summary (condensed)
+     :gates-only - return only gates-related fields
+     :deps-only  - return only dependency-related fields"
+  ([board card-id] (get-context-data board card-id {}))
+  ([board card-id opts]
+   (let [card       (load-card board card-id)
+         desc       (load-description board card-id)
+         history    (if-let [since-ep (:since opts)]
+                      (load-history board card-id since-ep)
+                      (load-history board card-id))
+         names      (lane-names board)
+         idx        (.indexOf names (:lane card))
+         next-lane  (when (and (>= idx 0) (< (inc idx) (count names)))
+                      (nth names (inc idx)))
+         next-cfg   (when next-lane (lane-by-name board next-lane))
+         gate-key   (str "gate_from_" (:lane card))
+         next-gates (if next-cfg (get next-cfg gate-key []) [])
+         lane-ins   (or (when-let [lc (lane-by-name board (:lane card))]
+                          (get lc "instructions"))
+                        (get default-lane-instructions (:lane card) ""))
+         usdeps     (unsatisfied-deps board card)
+         ;; Strategy-based history filtering
+         strategy   (or (:strategy opts) :full)
+         filtered-history
+         (condp = strategy
+           :summary
+           (let [recent (take-last 5 history)
+                 older  (drop-last 5 history)]
+             (if (seq older)
+               (into [{:ts "summary" :role "system" :action "summary"
+                       :content (str "Earlier activity: " (history-summary older))}]
+                     recent)
+               history))
+           :recent (vec (take-last 10 history))
+           history)
+         lane-entries (->> history (filter #(contains? #{"moved" "created" "pulled"} (:action %))))
+         last-entry   (last lane-entries)
+         prev-entry   (last (butlast lane-entries))
+         last-reject  (->> history
+                           (filter #(= "rejected" (:action %)))
+                           (filter #(and prev-entry last-entry
+                                         (> (:ts %) (:ts prev-entry))
+                                         (< (:ts %) (:ts last-entry))))
+                           last)
+         rejection-warning (when last-reject
+                             {"reason" (:content last-reject)
+                              "at"     (:ts last-reject)
+                              "by"     (or (not-empty (:agent-id last-reject)) "human")})
+         base-data
+         {"card"              (card->yaml-map card)
+          "description"       (or desc "")
+          "lane_instructions" lane-ins
+          "next_lane"         next-lane
+          "next_gates"        next-gates
+          "history"           (mapv #(select-keys % [:ts :role :action :content :agent-id :gate]) filtered-history)
+          "dependencies"      {"all" (vec (:depends-on card)) "unsatisfied" usdeps}
+          "rejection_warning" rejection-warning}]
+     ;; Focused modes: return only relevant fields
+     (cond
+       (:gates-only opts)
+       (select-keys base-data ["card" "lane_instructions" "next_lane" "next_gates" "rejection_warning"])
+       (:deps-only opts)
+       (select-keys base-data ["card" "dependencies"])
+       :else base-data))))
+
 (defn compact-history!
   "Permanently compress older history entries into a single summary entry.
    Keeps the last N entries intact, replaces everything before with one summary line."

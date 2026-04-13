@@ -533,7 +533,7 @@
                            (:deps-only opts)  (assoc :deps-only true))
             context (b/get-context board card-id context-opts)]
         (if (:json opts)
-          (out-json {:context context})
+          (out-json (b/get-context-data board card-id context-opts))
           (println context)))
       (catch Exception e
         (fail! (.getMessage e))))))

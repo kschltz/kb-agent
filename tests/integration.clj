@@ -6,6 +6,7 @@
   (:require [babashka.process :as proc]
             [clojure.string :as str]
             [clojure.java.io :as io]
+            [cheshire.core :as cheshire]
             [kb.board :as b]))
 
 (def pass (atom 0))
@@ -197,6 +198,44 @@
   ;; Progressive context: --deps-only
   (let [r (kb dir "context" "002" "--deps-only")]
     (T "context --deps-only exits 0" (:ok r) "context --deps-only failed"))
+
+  ;; Context --json: structured output
+  (let [r (kb dir "context" "001" "--json")]
+    (T "context --json exits 0" (:ok r) "context --json failed")
+    (let [output (txt r)]
+      (T "context --json is valid JSON" (try (do (cheshire.core/parse-string output) true)
+                                             (catch Exception _ false))
+         "not valid JSON")
+      (let [parsed (cheshire.core/parse-string output)]
+        (T "context --json has card key" (contains? parsed "card") "missing card key")
+        (T "context --json has description key" (contains? parsed "description") "missing description key")
+        (T "context --json has lane_instructions key" (contains? parsed "lane_instructions") "missing lane_instructions key")
+        (T "context --json has next_lane key" (contains? parsed "next_lane") "missing next_lane key")
+        (T "context --json has next_gates key" (contains? parsed "next_gates") "missing next_gates key")
+        (T "context --json has history key" (contains? parsed "history") "missing history key")
+        (T "context --json has dependencies key" (contains? parsed "dependencies") "missing dependencies key")
+        (T "context --json has rejection_warning key" (contains? parsed "rejection_warning") "missing rejection_warning key")
+        (T "context --json card has id" (contains? (get parsed "card") "id") "card missing id")
+        (T "context --json card has title" (contains? (get parsed "card") "title") "card missing title")
+        (T "context --json card has lane" (contains? (get parsed "card") "lane") "card missing lane"))))
+
+  ;; Context --json --gates-only: subset of fields
+  (let [r (kb dir "context" "001" "--json" "--gates-only")]
+    (T "context --json --gates-only exits 0" (:ok r) "context --json --gates-only failed")
+    (let [parsed (cheshire.core/parse-string (txt r))]
+      (T "context --json gates-only has card" (contains? parsed "card") "missing card in gates-only")
+      (T "context --json gates-only has next_gates" (contains? parsed "next_gates") "missing next_gates in gates-only")
+      (T "context --json gates-only lacks history" (not (contains? parsed "history")) "should not have history in gates-only")
+      (T "context --json gates-only lacks dependencies" (not (contains? parsed "dependencies")) "should not have dependencies in gates-only")))
+
+  ;; Context --json --deps-only: subset of fields
+  (let [r (kb dir "context" "002" "--json" "--deps-only")]
+    (T "context --json --deps-only exits 0" (:ok r) "context --json --deps-only failed")
+    (let [parsed (cheshire.core/parse-string (txt r))]
+      (T "context --json deps-only has card" (contains? parsed "card") "missing card in deps-only")
+      (T "context --json deps-only has dependencies" (contains? parsed "dependencies") "missing dependencies in deps-only")
+      (T "context --json deps-only lacks history" (not (contains? parsed "history")) "should not have history in deps-only")
+      (T "context --json deps-only lacks next_gates" (not (contains? parsed "next_gates")) "should not have next_gates in deps-only")))
 
   (println "\n== Reject ==")
   (kb dir "add" "Card to reject" "--lane" "in-progress")
