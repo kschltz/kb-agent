@@ -52,15 +52,14 @@
      "| `kb pull [--lane L] [--agent A]` | Claim next card |"
      "| `kb show <id>` | Card details |"
      "| `kb context <id>` | Full card context for agent prompt |"
+     "| `kb whoami` | Which card am I working on? |"
      "| `kb note <id> \"msg\"` | Log progress |"
      "| `kb ask <id> \"question\"` | Ask the human (blocks card) |"
      "| `kb advance <id>` | Move to next lane (runs gates) |"
-     "| `kb done <id>` | Move to final lane (runs all gates) |"
+     "| `kb reject <id> --reason R` | Send card back (if lane work failed) |"
      "| `kb block <id> --reason R` | Mark card blocked |"
      "| `kb heartbeat <id>` | Record agent heartbeat |"
      "| `kb diff <id>` | Show diff vs base branch |"
-     "| `kb link <id> <dep-id>` | Add dependency |"
-     "| `kb deps <id>` | Show dependencies |"
      ""]))
 
 ;; ── Output helpers ────────────────────────────────────────────

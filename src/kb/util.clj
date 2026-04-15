@@ -14,6 +14,8 @@
 (def board-file "board.yaml")
 (def cards-dir "cards")
 (def worktrees-dir "worktrees")
+(def skill-dir ".claude/skills/kb")
+(def skill-file "SKILL.md")
 
 ;; ── Path helpers ─────────────────────────────────────────────
 

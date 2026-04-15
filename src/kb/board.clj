@@ -2235,9 +2235,10 @@
 
 ;; ── Init board ────────────────────────────────────────────────
 
-(def skill-content
-  "Claude Code skill that teaches agents how to use kb with lane discipline.
-   Written to .claude/skills/kb/SKILL.md by init-board!."
+(def ^:private skill-content-delay
+  "Delay-wrapped skill content. Realized only when init-board! needs it.
+   Avoids allocating ~3 KB string on every kb invocation."
+  (delay
   (str/join "\n"
     ["---"
      "name: kb"
@@ -2329,7 +2330,12 @@
      "| `kb reject <id> --reason R` | Send card back (if lane work failed) |"
      "| `kb block <id> --reason R` | Mark card blocked |"
      "| `kb heartbeat <id>` | Record agent heartbeat |"
-     "| `kb diff <id>` | Show diff vs base branch |"]))
+     "| `kb diff <id>` | Show diff vs base branch |"])))
+
+(defn skill-content
+  "Return the kb skill markdown content. Realized on first call."
+  []
+  @skill-content-delay)
 
 (defn init-board!
   "Initialize a new .kanban/ directory in a git repo.
@@ -2383,8 +2389,9 @@
              (spit (str gitignore-path) (str u/kanban-dir "/\n") :append true)))
 
          ;; Create Claude Code skill for lane discipline
-         (let [skill-dir (u/path-resolve project-root ".claude/skills/kb")]
+         (let [skill-dir (u/path-resolve project-root u/skill-dir)]
            (u/mkdirs skill-dir)
-           (spit (str (u/path-resolve skill-dir "SKILL.md")) skill-content))
+           (u/atomic-write! (str (u/path-resolve skill-dir u/skill-file))
+                            (skill-content)))
 
          (make-board root))))))
