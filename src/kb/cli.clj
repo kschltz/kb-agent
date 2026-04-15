@@ -40,6 +40,9 @@
      "- Use `kb ask` when you need clarification — the card blocks until the human answers"
      "- Do not skip quality gates — fix failures before retrying"
      "- One card at a time unless explicitly told to work on multiple"
+     "- Advance through lanes sequentially — do not skip lanes or move to arbitrary lanes without user approval"
+     "- Stay within lane scope — read lane instructions via `kb context <id>` and follow MUST/MUST NOT sections"
+     "- See the `/kb` skill for full lane discipline rules"
      ""
      "## Quick Reference"
      ""
@@ -158,7 +161,8 @@
         (println (str "Initialized kanban board at " (:root board)))
         (println (str "Base branch: " (b/base-branch board)))
         (println "Edit .kanban/board.yaml to configure lanes and gates.")
-        (println "Agent instructions appended to CLAUDE.md."))
+        (println "Agent instructions appended to CLAUDE.md.")
+        (println "Lane discipline skill created at .claude/skills/kb/SKILL.md."))
       (catch Exception e
         (fail! (.getMessage e))))))
 
