@@ -533,7 +533,8 @@
                            (:strategy opts) (assoc :strategy (keyword (:strategy opts)))
                            (:budget opts)   (assoc :budget (int (:budget opts)))
                            (:gates-only opts) (assoc :gates-only true)
-                           (:deps-only opts)  (assoc :deps-only true))
+                           (:deps-only opts)  (assoc :deps-only true)
+                           (:scope opts)      (assoc :scope-only true))
             context (b/get-context board card-id context-opts)]
         (if (:json opts)
           (out-json (b/get-context-data board card-id context-opts))
@@ -1173,7 +1174,9 @@
            :gates-only {:desc "Only show gates information for the card"
                         :type :bool}
            :deps-only {:desc "Only show dependency information for the card"
-                       :type :bool}}}
+                       :type :bool}
+           :scope {:desc "Only show lane scope restrictions (MUST/MUST NOT)"
+                   :type :bool}}}
    {:cmds ["spawn"] :fn cmd-spawn :args->opts [:card-id]}
    {:cmds ["spawn-parallel"] :fn cmd-spawn-parallel
     :spec {:count {:desc "Number of agents to spawn (default: 2)"

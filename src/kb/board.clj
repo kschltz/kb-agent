@@ -295,6 +295,70 @@
         (get default-lane-instructions lane-name)
         (str "Work on this card in lane '" lane-name "'. Use `kb advance` when ready to move forward."))))
 
+(defn- extract-must-not
+  "Extract MUST NOT items from lane instruction text.
+   Returns a vector of item strings, or empty vector if none found."
+  [text]
+  (when (string? text)
+    (let [lines   (str/split-lines text)
+          collecting (volatile! false)
+          items   (reduce (fn [acc line]
+                            (let [trimmed (str/trim line)]
+                              (cond
+                                (re-find #"##\s*MUST\s*NOT" trimmed)
+                                (do (vreset! collecting true) acc)
+                                (and @collecting (re-find #"^##\s" trimmed))
+                                (do (vreset! collecting false) acc)
+                                (and @collecting (re-find #"^- " trimmed))
+                                (conj acc (str/trim (subs trimmed 2)))
+                                :else acc)))
+                          []
+                          lines)]
+      (vec items))))
+
+(defn- extract-must
+  "Extract MUST items from lane instruction text.
+   Returns a vector of item strings, or empty vector if none found."
+  [text]
+  (when (string? text)
+    (let [lines   (str/split-lines text)
+          collecting (volatile! false)
+          items   (reduce (fn [acc line]
+                            (let [trimmed (str/trim line)]
+                              (cond
+                                (re-find #"##\s*MUST\s*$" trimmed)
+                                (do (vreset! collecting true) acc)
+                                (and @collecting (re-find #"^##\s" trimmed))
+                                (do (vreset! collecting false) acc)
+                                (and @collecting (re-find #"^- " trimmed))
+                                (conj acc (str/trim (subs trimmed 2)))
+                                :else acc)))
+                          []
+                          lines)]
+      (vec items))))
+
+(defn lane-scope-restrictions
+  "Return the MUST NOT items for a lane as a vector of strings.
+   Loads from markdown file or resolved instructions text."
+  [board lane-name]
+  (let [md-ins  (load-lane-md board lane-name)
+        ins     (or md-ins
+                    (let [lc (lane-by-name board lane-name)]
+                      (or (and lc (get lc "instructions"))
+                          (get default-lane-instructions lane-name))))]
+    (extract-must-not ins)))
+
+(defn lane-must-items
+  "Return the MUST items for a lane as a vector of strings.
+   Loads from markdown file or resolved instructions text."
+  [board lane-name]
+  (let [md-ins  (load-lane-md board lane-name)
+        ins     (or md-ins
+                    (let [lc (lane-by-name board lane-name)]
+                      (or (and lc (get lc "instructions"))
+                          (get default-lane-instructions lane-name))))]
+    (extract-must ins)))
+
 (defn lane-by-name
   "Return the lane config map for `name`, or nil."
   [board name]
@@ -1806,8 +1870,31 @@
 
 ;; ── Advance / Done shortcuts ───────────────────────────────────
 
+(defn- lane-entry-time
+  "Return the epoch timestamp when the card most recently entered its current lane.
+   Looks for the last 'moved' or 'created' action in history."
+  [board card-id]
+  (let [history (load-history board card-id)
+        entries (filter #(contains? #{"moved" "created"} (:action %)) history)]
+    (when-let [entry (last entries)]
+      (:ts entry))))
+
+(defn- has-lane-note?
+  "Check if at least one agent note exists in the card's history after it entered the current lane."
+  [board card-id]
+  (let [entry-time (lane-entry-time board card-id)]
+    (if (nil? entry-time)
+      true  ;; No entry time found (e.g. newly created card) — allow advancement
+      (let [history (load-history board card-id)]
+        (some? (->> history
+                    (filter #(and (= "note" (:action %))
+                                  (= "agent" (:role %))
+                                  (> (:ts %) entry-time)))
+                    first))))))
+
 (defn advance!
-  "Move card to the next lane in the workflow. Returns [success? message gate-results]."
+  "Move card to the next lane in the workflow. Returns [success? message gate-results].
+   Requires at least one agent note in the current lane before advancing (first/last lanes exempt)."
   [board card-id & {:keys [agent confidence] :or {agent "" confidence nil}}]
   (let [card   (load-card board card-id)
         names  (lane-names board)
@@ -1815,7 +1902,16 @@
         next   (when (and (>= idx 0) (< (inc idx) (count names)))
                  (nth names (inc idx)))]
     (if next
-      (move! board card-id next :agent agent :confidence confidence)
+      ;; Note gate: require at least one agent note in the current lane (exempt first and last lanes)
+      (if (and (pos? idx) (< (inc idx) (count names)) (not (has-lane-note? board card-id)))
+        (let [must-items (lane-must-items board (:lane card))
+              must-line  (when (seq must-items)
+                           (str "\n\nThis lane requires:\n"
+                                (str/join "\n" (mapv #(str "- " %) must-items))))]
+          [false (str "Cannot advance from '" (:lane card) "' — no agent note recorded in this lane. "
+                      "Log your progress with `kb note " card-id " \"<message>\"` before advancing."
+                      (or must-line "")) []])
+        (move! board card-id next :agent agent :confidence confidence))
       [false (str "Card is already in the last lane ('" (:lane card) "').") []])))
 
 (defn done!
@@ -1863,7 +1959,8 @@
      :budget     - max character count for output (nil = unlimited)
      :since      - only include history entries after this epoch timestamp
      :gates-only - only output gates information (for quick checks)
-     :deps-only  - only output dependency information"
+     :deps-only  - only output dependency information
+     :scope-only - only output lane scope restrictions (MUST/MUST NOT items)"
   ([board card-id] (get-context board card-id {}))
   ([board card-id opts]
   (let [agent-command (get (:config board) "agent_command" "")]
@@ -2032,6 +2129,31 @@
                           ""]
                          deps-output))
 
+                  (:scope-only opts)
+                  (let [lane        (:lane card)
+                        must-nots   (lane-scope-restrictions board lane)
+                        must-items  (lane-must-items board lane)
+                        ins         (let [md-ins (load-lane-md board lane)]
+                                      (or md-ins
+                                          (let [lc (lane-by-name board lane)]
+                                            (or (and lc (get lc "instructions"))
+                                                (get default-lane-instructions lane)))))]
+                    (vec (concat
+                           [(str "# Lane Scope: " lane)
+                            ""]
+                           (when (seq must-items)
+                             (into ["## MUST"]
+                                   (mapv #(str "- " %) must-items)))
+                           (when (and (seq must-items) (seq must-nots))
+                             [""])
+                           (when (seq must-nots)
+                             (into ["## ⚠️ MUST NOT"]
+                                   (mapv #(str "- " %) must-nots)))
+                           (when (empty? must-items)
+                             (when (empty? must-nots)
+                               [(str "No specific MUST/MUST NOT items defined for lane '" lane "'.")
+                                (str "General instruction: " ins)])))))
+
                   :else
                   (let [usdeps    (unsatisfied-deps board card)
                         dep-status (if (seq usdeps)
@@ -2074,6 +2196,12 @@
                                                     (get default-lane-instructions lane)
                                                     (str "Work on this card in lane '" lane "'. Use `kb advance` when ready to move forward."))]
                                     [(str "## Lane: " lane) ins ""]))))
+                        ;; LANE SCOPE RESTRICTIONS — extracted MUST NOT items as a prominent warning
+                        (into (let [must-nots (lane-scope-restrictions board (:lane card))]
+                                (when (seq must-nots)
+                                  (into ["## ⚠️ LANE SCOPE RESTRICTIONS" ""
+                                          (str "You are in the **" (:lane card) "** lane. Violating these restrictions will get your work rejected.")]
+                                        (mapv #(str "> ❌ " %) must-nots)))))
                         (into (when (not (str/blank? desc))
                                  ["## Description" "" (str/trim desc) ""]))
                       (into gates-output)
@@ -2115,28 +2243,35 @@
       ;; Apply budget trimming if configured
       (let [final-lines (if budget
                           (trim-to-budget lines budget)
-                          lines)]
+                          lines)
+            scope-line  (let [must-nots (lane-scope-restrictions board (:lane card))]
+                          (if (seq must-nots)
+                            (str "⚠️ You are in the **" (:lane card) "** lane — you MUST NOT: " (str/join "; " must-nots))
+                            (str "You are in the **" (:lane card) "** lane.")))]
         (str/join "\n"
                   (into (into final-lines
                               ;; Rejection warning is immune to budget trimming — always appended after trim
-                              (when (not (or (:gates-only opts) (:deps-only opts)))
+                              (when (not (or (:gates-only opts) (:deps-only opts) (:scope-only opts)))
                                 rejection-warning-lines))
-                         ["## Instructions"
-                          ""
-                          "You are working on this card. Your working directory is the git worktree for this card."
-                          "Use these commands to interact with the board:"
-                          ""
-                          (str "- `kb note " card-id " \"<message>\"` -- log your thinking or progress")
-                          (str "- `kb ask " card-id " \"<question>\"` -- ask the human a question (card will be blocked until answered)")
-                          (str "- `kb advance " card-id "` -- move card to the next lane (runs gates)")
-                          (str "- `kb move " card-id " <lane>` -- move card to a specific lane (runs gates)")
-                          (str "- `kb log " card-id "` -- check for new human notes or answers")
-                          (str "- `kb diff " card-id "` -- see your changes vs the base branch")
-                          (str "- `kb heartbeat " card-id "` -- signal you are still working (call every 2 minutes)")
-                          ""
-                          "Before each major step, check `kb log` for new human instructions."
-                          "If you are unsure about something, use `kb ask` to ask the human."
-                          "When you believe the task is complete and tests pass, use `kb advance` to move forward."])))))))
+                         (if (:scope-only opts)
+                           []
+                           ["## Instructions"
+                            ""
+                            scope-line
+                            "You are working on this card. Your working directory is the git worktree for this card."
+                            "Use these commands to interact with the board:"
+                            ""
+                            (str "- `kb note " card-id " \"<message>\"` -- log your thinking or progress")
+                            (str "- `kb ask " card-id " \"<question>\"` -- ask the human a question (card will be blocked until answered)")
+                            (str "- `kb advance " card-id "` -- move card to the next lane (runs gates)")
+                            (str "- `kb move " card-id " <lane>` -- move card to a specific lane (runs gates)")
+                            (str "- `kb log " card-id "` -- check for new human notes or answers")
+                            (str "- `kb diff " card-id "` -- see your changes vs the base branch")
+                            (str "- `kb heartbeat " card-id "` -- signal you are still working (call every 2 minutes)")
+                            ""
+                            "Before each major step, check `kb log` for new human instructions."
+                            "If you are unsure about something, use `kb ask` to ask the human."
+                            "When you believe the task is complete and tests pass, use `kb advance` to move forward."]))))))))
 
 (defn get-context-data
   "Return structured context data as a map (for --json output).
@@ -2144,7 +2279,8 @@
      :since      - only include history after this epoch timestamp
      :strategy   - :full (default), :recent (last 10), :summary (condensed)
      :gates-only - return only gates-related fields
-     :deps-only  - return only dependency-related fields"
+     :deps-only  - return only dependency-related fields
+     :scope-only - return only lane scope restrictions (MUST/MUST NOT items)"
   ([board card-id] (get-context-data board card-id {}))
   ([board card-id opts]
    (let [card       (load-card board card-id)
@@ -2205,6 +2341,15 @@
        (select-keys base-data ["card" "lane_instructions" "next_lane" "next_gates" "rejection_warning"])
        (:deps-only opts)
        (select-keys base-data ["card" "dependencies"])
+       (:scope-only opts)
+       (let [lane        (:lane card)
+             must-nots   (lane-scope-restrictions board lane)
+             must-items  (lane-must-items board lane)]
+         {"card"            (card->yaml-map card)
+          "lane"            lane
+          "must"            (vec must-items)
+          "must_not"        (vec must-nots)
+          "lane_instructions" lane-ins})
        :else base-data))))
 
 (defn compact-history!
@@ -2268,6 +2413,12 @@
      ""
      "These are non-negotiable. Violating them breaks the workflow for the entire team."
      ""
+     "### First action in any lane: read the rules"
+     ""
+     "- Before doing ANY work in a lane, run `kb context <id>` and read the MUST/MUST NOT sections"
+     "- The lane scope is authoritative — not your intuition about what 'needs doing'"
+     "- If you skipped this step and started working blindly, stop and read `kb context <id>` now"
+     ""
      "### Sequential traversal only"
      ""
      "- You MUST advance through lanes one at a time using `kb advance <id>`"
@@ -2288,6 +2439,17 @@
      "- When in doubt, re-read `kb context <id>` — the lane instructions are authoritative"
      ""
      "**Why**: Mixing lane scopes leads to unplanned work, unreviewed changes, and untested code."
+     ""
+     "### Common violations that get work rejected"
+     ""
+     "| Violation | What happens | Correct approach |"
+     "|-----------|-------------|-----------------|"
+     "| Writing code in discovery | Card rejected back to discovery | Research only, then `kb advance` to plan |"
+     "| Writing code in plan | Card rejected back to plan | Plan only, then `kb advance` to in-progress |"
+     "| Adding features in unit-tests | Card rejected back to unit-tests | Write/fix tests only, then `kb advance` |"
+     "| Skipping plan to code | Card rejected back to discovery | Plan first, code second |"
+     "| Advancing without a `kb note` | `kb advance` is blocked | Log at least one note per lane before advancing |"
+     "| Using `kb move` to skip lanes | Command refused (unless user-approved) | Use `kb advance` for sequential traversal |"
      ""
      "### Do not move without completing lane work"
      ""
@@ -2323,6 +2485,7 @@
      "| `kb pull [--lane L] [--agent A]` | Claim next card |"
      "| `kb show <id>` | Card details |"
      "| `kb context <id>` | Full card context for agent prompt |"
+     "| `kb context <id> --scope` | Lane scope restrictions only (re-inject mid-conversation) |"
      "| `kb whoami` | Which card am I working on? |"
      "| `kb note <id> \"msg\"` | Log progress |"
      "| `kb ask <id> \"question\"` | Ask the human (blocks card) |"
