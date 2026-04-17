@@ -91,6 +91,11 @@
          :message      msg
          :gate_results (mapv identity gate-results)})
 
+      "release"
+      (let [[ok? msg] (board/release! b card_id :agent "human-ui")]
+        {:success ok?
+         :message msg})
+
       "reject"
       (let [card (board/reject! b card_id :reason (or reason "") :agent "human-ui")]
         {:success true :card card})

@@ -879,12 +879,16 @@
 (defn pull!
   "Pull the next available card. Creates worktree + branch.
    If :lane is specified, also moves the card to that lane.
+   If :session is specified, agent-id is formatted as <session>-<card-id>-<lane>.
    Returns card map or nil if no card available."
-  [board & {:keys [agent lane]}]
+  [board & {:keys [agent lane session]}]
   (let [card (find-available-card board)]
     (when card
-      (let [agent-id   (or (and (not (str/blank? agent)) agent)
-                           (str "agent-" (subs (str (java.util.UUID/randomUUID)) 0 6)))
+      (let [target-lane (or lane (:lane card))
+            agent-id   (cond
+                         (not (str/blank? agent)) agent
+                         (not (str/blank? session)) (str session "-" (:id card) "-" target-lane)
+                         :else (str "agent-" (subs (str (java.util.UUID/randomUUID)) 0 6)))
             ;; Move card to target lane first (before creating worktree, so gates see correct state)
             _          (when (and lane (not= (:lane card) lane))
                          (let [[ok? msg _gates] (move! board (:id card) lane :agent agent-id)]
@@ -1002,8 +1006,8 @@
 (defn move!
   "Move card to target-lane. Runs quality gates.
    Returns [success? message gate-results].
-   Opts: :agent, :confidence (0-100)"
-  [board card-id target-lane & {:keys [agent confidence] :or {agent "" confidence nil}}]
+   Opts: :agent, :confidence (0-100), :force? (override active-agent guard)"
+  [board card-id target-lane & {:keys [agent confidence force?] :or {agent "" confidence nil force? false}}]
   (if-not (some #{target-lane} (lane-names board))
     [false (str "Lane '" target-lane "' not found.") []]
     (let [card        (load-card board card-id)
@@ -1017,6 +1021,9 @@
 
         (:pending-approval card)
         [false (str "Card " card-id " is pending approval. Run `kb approve " card-id "` first.") []]
+
+        (and (not (str/blank? (:assigned-agent card))) (not force?))
+        [false (str "Card " card-id " has active agent '" (:assigned-agent card) "'. Run `kb release " card-id "` first, or use --force.") []]
 
         :else
         (let [target-config  (lane-by-name board target-lane)
@@ -1160,6 +1167,12 @@
                           (run-hooks! board "completed" (load-card board card-id) :agent agent)
                           (maybe-unblock-parent! board (load-card board card-id))))
                       [true (str "Moved to '" target-lane "'.") gate-results])))))))))))))))
+
+(defn auto-spawn?
+  "Returns truthy if the given lane has auto_spawn configured to true."
+  [board lane-name]
+  (when-let [cfg (lane-by-name board lane-name)]
+    (get cfg "auto_spawn")))
 
 (defn reject!
   "Move card back to previous lane."
@@ -1894,8 +1907,9 @@
 
 (defn advance!
   "Move card to the next lane in the workflow. Returns [success? message gate-results].
-   Requires at least one agent note in the current lane before advancing (first/last lanes exempt)."
-  [board card-id & {:keys [agent confidence] :or {agent "" confidence nil}}]
+   Requires at least one agent note in the current lane before advancing (first/last lanes exempt).
+   Opts: :agent, :confidence (0-100), :force? (override active-agent guard)"
+  [board card-id & {:keys [agent confidence force?] :or {agent "" confidence nil force? false}}]
   (let [card   (load-card board card-id)
         names  (lane-names board)
         idx    (.indexOf names (:lane card))
@@ -1911,15 +1925,50 @@
           [false (str "Cannot advance from '" (:lane card) "' — no agent note recorded in this lane. "
                       "Log your progress with `kb note " card-id " \"<message>\"` before advancing."
                       (or must-line "")) []])
-        (move! board card-id next :agent agent :confidence confidence))
+        (move! board card-id next :agent agent :confidence confidence :force? force?))
       [false (str "Card is already in the last lane ('" (:lane card) "').") []])))
 
 (defn done!
   "Move card directly to the last lane (runs all intermediate gates). Returns [success? message gate-results]."
-  [board card-id & {:keys [agent] :or {agent ""}}]
+  [board card-id & {:keys [agent force?] :or {agent "" force? false}}]
   (let [names     (lane-names board)
         last-lane (last names)]
-    (move! board card-id last-lane :agent agent)))
+    (move! board card-id last-lane :agent agent :force? force?)))
+
+(defn release!
+  "Agent signals completion of lane work. Clears assigned-agent and records history.
+   Requires at least one agent note in the current lane (unless --force).
+   Returns [success? message]."
+  [board card-id & {:keys [agent force?] :or {agent "" force? false}}]
+  (let [card (load-card board card-id)
+        assigned (:assigned-agent card)]
+    (cond
+      (str/blank? assigned)
+      [false (str "Card " card-id " has no active agent to release.")]
+
+      (and (not (str/blank? agent))
+           (not= agent assigned)
+           (not force?))
+      [false (str "Agent '" agent "' does not match assigned agent '" assigned "'. Use --force to override.")]
+
+      (and (not force?) (not (has-lane-note? board card-id)))
+      (let [must-items (lane-must-items board (:lane card))
+            must-line  (when (seq must-items)
+                         (str "\n\nThis lane requires:\n"
+                              (str/join "\n" (mapv #(str "- " %) must-items))))]
+        [false (str "Cannot release card " card-id " — no agent note recorded in lane '" (:lane card) "'. "
+                    "Log your progress with `kb note " card-id " \"<message>\"` before releasing."
+                    (or must-line ""))])
+
+      :else
+      (let [card2 (assoc card :assigned-agent "")]
+        (save-card! board card2)
+        (append-history! board card-id
+                         (make-history-entry "system" "released"
+                                             :content (str "Agent '" assigned "' released card from lane '" (:lane card) "'")
+                                             :agent-id assigned))
+        (run-hooks! board "released" card2 :agent assigned)
+        [true (str "Card " card-id " released by agent '" assigned "'.")]))))
 
 ;; ── Context generation ─────────────────────────────────────────
 

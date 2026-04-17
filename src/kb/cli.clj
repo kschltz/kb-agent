@@ -191,7 +191,7 @@
 (defn cmd-pull
   [{:keys [opts]}]
   (let [board (b/make-board)
-        card (b/pull! board :agent (:agent opts "") :lane (:lane opts))]
+        card (b/pull! board :agent (:agent opts "") :lane (:lane opts) :session (:session opts))]
     (if (nil? card)
       (do
         (when (:json opts) (out-json nil))
@@ -218,11 +218,17 @@
         confidence (:confidence opts)
         [success? message gate-results] (b/move! board card-id lane
                                                    :agent (:agent opts "")
-                                                   :confidence confidence)]
+                                                   :confidence confidence
+                                                   :force? (:force opts false))]
+    (when (and success? (b/auto-spawn? board lane))
+      (let [card (b/load-card board card-id)]
+        (println (str "Auto-spawn triggered for lane '" lane "'."))
+        (spawn-agent board card)))
     (if (:json opts)
       (out-json {:success success?
                  :message message
-                 :gate_results gate-results})
+                 :gate_results gate-results
+                 :auto_spawn (and success? (b/auto-spawn? board lane))})
       (if success?
         (println (str "\u2713 " message))
         (do
@@ -919,9 +925,18 @@
         board (b/make-board)
         [success? message gate-results] (b/advance! board card-id
                                                       :agent (:agent opts "")
-                                                      :confidence (:confidence opts))]
+                                                      :confidence (:confidence opts)
+                                                      :force? (:force opts false))]
+    (when (and success?
+               (let [card (b/load-card board card-id)]
+                 (b/auto-spawn? board (:lane card))))
+      (let [card (b/load-card board card-id)]
+        (println (str "Auto-spawn triggered for lane '" (:lane card) "'."))
+        (spawn-agent board card)))
     (if (:json opts)
-      (out-json {:success success? :message message :gate_results gate-results})
+      (out-json {:success success? :message message :gate_results gate-results
+                 :auto_spawn (and success?
+                                  (b/auto-spawn? board (:lane (b/load-card board card-id))))})
       (if success?
         (println (str "\u2713 " message))
         (do
@@ -934,9 +949,28 @@
   (let [card-id (->card-id opts)
         _ (when (str/blank? card-id) (fail! "card-id is required"))
         board (b/make-board)
-        [success? message gate-results] (b/done! board card-id :agent (:agent opts ""))]
+        [success? message gate-results] (b/done! board card-id
+                                                   :agent (:agent opts "")
+                                                   :force? (:force opts false))]
     (if (:json opts)
       (out-json {:success success? :message message :gate_results gate-results})
+      (if success?
+        (println (str "\u2713 " message))
+        (do
+          (binding [*out* *err*]
+            (println (str "\u2717 " message)))
+          (System/exit 1))))))
+
+(defn cmd-release
+  [{:keys [opts]}]
+  (let [card-id (->card-id opts)
+        _ (when (str/blank? card-id) (fail! "card-id is required"))
+        board (b/make-board)
+        [success? message] (b/release! board card-id
+                                        :agent (:agent opts "")
+                                        :force? (:force opts false))]
+    (if (:json opts)
+      (out-json {:success success? :message message})
       (if success?
         (println (str "\u2713 " message))
         (do
@@ -1093,6 +1127,7 @@
       (println "  move     <card-id> <lane> [opts]        Move a card to a lane (runs gates)")
       (println "  advance  <card-id> [opts]              Move card to next lane (runs gates)")
       (println "  done     <card-id> [opts]              Move card to final lane (runs all gates)")
+      (println "  release  <card-id> [opts]             Release agent assignment on a card")
       (println "  reject   <card-id> [opts]               Reject a card back to previous lane")
       (println "  block    <card-id> [opts]               Block a card")
       (println "  unblock  <card-id> [opts]               Unblock a card")
@@ -1125,18 +1160,37 @@
 (def dispatch-table
   [{:cmds ["init"] :fn cmd-init :args->opts [:path]}
    {:cmds ["add"] :fn cmd-add :args->opts [:title]}
-   {:cmds ["pull"] :fn cmd-pull}
+   {:cmds ["pull"] :fn cmd-pull
+    :opts {:agent {:desc "Agent ID to assign"
+                   :type :string}
+           :lane {:desc "Target lane to move card to"
+                  :type :string}
+           :session {:desc "Session name for agent ID (format: <session>-<card>-<lane>)"
+                     :type :string}}}
    {:cmds ["move"] :fn cmd-move :args->opts [:card-id :lane]
     :opts {:confidence {:desc "Agent confidence level (0-100) for the move"
                         :type :number}
            :agent {:desc "Agent ID performing the move"
-                   :type :string}}}
+                   :type :string}
+           :force {:desc "Force move even if an agent is assigned to the card"
+                   :type :boolean}}}
    {:cmds ["advance"] :fn cmd-advance :args->opts [:card-id]
     :opts {:confidence {:desc "Agent confidence level (0-100) for the advance"
                         :type :number}
            :agent {:desc "Agent ID performing the advance"
-                   :type :string}}}
-   {:cmds ["done"] :fn cmd-done :args->opts [:card-id]}
+                   :type :string}
+           :force {:desc "Force advance even if an agent is assigned to the card"
+                   :type :boolean}}}
+   {:cmds ["done"] :fn cmd-done :args->opts [:card-id]
+    :opts {:agent {:desc "Agent ID performing the done"
+                   :type :string}
+           :force {:desc "Force done even if an agent is assigned to the card"
+                   :type :boolean}}}
+   {:cmds ["release"] :fn cmd-release :args->opts [:card-id]
+    :opts {:agent {:desc "Agent ID releasing the card (must match assigned-agent)"
+                   :type :string}
+           :force {:desc "Force release even if agent does not match"
+                   :type :boolean}}}
    {:cmds ["reject"] :fn cmd-reject :args->opts [:card-id]}
    {:cmds ["block"] :fn cmd-block :args->opts [:card-id]}
    {:cmds ["unblock"] :fn cmd-unblock :args->opts [:card-id]}
