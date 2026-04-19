@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { CardData, UICommand } from '../types';
-import { fmtTime, fmtFull, colorDiff } from '../lib/utils';
+import { fmtTime, fmtFull } from '../lib/utils';
+import { DiffView } from './DiffView';
+import { ApprovalBar } from './ApprovalBar';
 
 interface CardDetailProps {
   card: CardData | null;
@@ -10,7 +12,9 @@ interface CardDetailProps {
 }
 
 export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) {
-  const [diffHtml, setDiffHtml] = useState<string | null>(null);
+  const [diffText, setDiffText] = useState<string | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffEmpty, setDiffEmpty] = useState(false);
   const [askText, setAskText] = useState('');
   const [answerText, setAnswerText] = useState('');
   const noteRef = useRef<HTMLInputElement>(null);
@@ -25,8 +29,34 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
   }, [handleKeyDown]);
 
   useEffect(() => {
-    setDiffHtml(null);
+    setDiffText(null);
+    setDiffEmpty(false);
   }, [card?.id]);
+
+  // Auto-fetch diff for cards with branches
+  useEffect(() => {
+    if (!card?.branch) return;
+    let cancelled = false;
+    const fetchDiff = async () => {
+      setDiffLoading(true);
+      try {
+        const resp = await fetch(`/api/cards/${card.id}/diff`);
+        const data = await resp.json() as { diff?: string; error?: string };
+        if (cancelled) return;
+        if (data.diff !== undefined) {
+          if (data.diff.trim()) {
+            setDiffText(data.diff);
+            setDiffEmpty(false);
+          } else {
+            setDiffEmpty(true);
+          }
+        }
+      } catch { /* ignore */ }
+      if (!cancelled) setDiffLoading(false);
+    };
+    fetchDiff();
+    return () => { cancelled = true; };
+  }, [card?.id, card?.updated_at]);
 
   if (!card) return null;
 
@@ -39,21 +69,6 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
     if (msg) {
       send({ action: 'note', card_id: card.id, message: msg });
       noteRef.current!.value = '';
-    }
-  };
-
-  const viewFullDiff = async () => {
-    setDiffHtml('<span style="color:var(--text-2)">Loading diff...</span>');
-    try {
-      const resp = await fetch(`/api/cards/${card.id}/diff`);
-      const data = await resp.json() as { diff?: string; error?: string };
-      if (data.diff !== undefined) {
-        setDiffHtml(data.diff.trim() ? colorDiff(data.diff) : '<span style="color:var(--text-2)">No changes yet.</span>');
-      } else {
-        setDiffHtml(`<span style="color:var(--danger)">${data.error ?? 'Failed to load diff'}</span>`);
-      }
-    } catch {
-      setDiffHtml('<span style="color:var(--danger)">Network error loading diff.</span>');
     }
   };
 
@@ -127,17 +142,14 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
             </div>
           )}
 
-          {/* Pending approval banner */}
+          {/* Pending approval: sticky bar + auto diff */}
           {card.pending_approval && (
-            <div style={{
-              background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.3)',
-              borderRadius: 'var(--radius)', padding: '12px 14px', marginBottom: 16,
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            }}>
-              <span style={{ fontSize: '0.923rem', color: '#eab308' }}>⏳ Pending approval</span>
-              <button onClick={() => send({ action: 'approve', card_id: card.id })}
-                style={{ ...btnStyle, borderColor: 'var(--accent-dim)', color: 'var(--accent)' }}>Approve</button>
-            </div>
+            <ApprovalBar
+              cardId={card.id}
+              onApprove={() => send({ action: 'approve', card_id: card.id })}
+              onReject={(reason) => send({ action: 'reject', card_id: card.id, reason })}
+              position="top"
+            />
           )}
 
           {/* Meta */}
@@ -170,21 +182,15 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
             </dl>
           </Section>
 
-          {/* Diff stat */}
-          {card.diff_stat?.trim() && (
+          {/* Changes section */}
+          {card.branch && (diffText || diffLoading || diffEmpty || card.diff_stat?.trim()) && (
             <Section title="Changes">
-              <div style={{
-                background: 'var(--bg-0)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)', padding: 12,
-                fontFamily: 'var(--mono)', fontSize: '0.846rem', lineHeight: 1.6,
-                whiteSpace: 'pre', overflowX: 'auto', color: 'var(--text-1)',
-                maxHeight: diffHtml ? 600 : 400, overflowY: 'auto',
-              }} dangerouslySetInnerHTML={{ __html: diffHtml || escapeHtml(card.diff_stat) }} />
-              {!diffHtml && (
-                <button onClick={viewFullDiff} style={{
-                  ...btnStyle, borderColor: 'var(--accent-dim)', color: 'var(--accent)', marginTop: 8,
-                }}>View full diff</button>
-              )}
+              <DiffView
+                diffText={diffText}
+                diffStat={card.diff_stat}
+                loading={diffLoading}
+                empty={diffEmpty}
+              />
             </Section>
           )}
 
@@ -253,6 +259,16 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
           )}
         </div>
 
+        {/* Bottom approval bar for long diffs */}
+        {card.pending_approval && diffText && (
+          <ApprovalBar
+            cardId={card.id}
+            onApprove={() => send({ action: 'approve', card_id: card.id })}
+            onReject={(reason) => send({ action: 'reject', card_id: card.id, reason })}
+            position="bottom"
+          />
+        )}
+
         {/* Actions */}
         <div style={{
           padding: '12px 20px', borderTop: '1px solid var(--border)',
@@ -308,6 +324,3 @@ function Dd({ children }: { children: React.ReactNode }) {
   return <dd style={{ color: 'var(--text-0)', fontFamily: 'var(--mono)', fontSize: '0.846rem', wordBreak: 'break-all' }}>{children}</dd>;
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
