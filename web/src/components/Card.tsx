@@ -44,19 +44,19 @@ export function Card({ card, onClick }: CardProps) {
         onClick={e => e.stopPropagation()}
         style={{
           position: 'absolute', top: 6, right: 6,
-          cursor: 'grab', color: 'var(--text-2)', fontSize: 10, opacity: 0.4,
+          cursor: 'grab', color: 'var(--text-2)', fontSize: '0.769rem', opacity: 0.4,
           padding: '2px 3px', lineHeight: 1, userSelect: 'none',
         }}
         title="Drag to move"
       >⠿</span>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-2)', marginBottom: 3 }}>#{card.id}</div>
-      <div style={{ fontWeight: 500, fontSize: 13, color: 'var(--text-0)', marginBottom: 6, wordBreak: 'break-word' }}>{card.title}</div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: '0.769rem', color: 'var(--text-2)', marginBottom: 3 }}>#{card.id}</div>
+      <div style={{ fontWeight: 500, fontSize: '1rem', color: 'var(--text-0)', marginBottom: 6, wordBreak: 'break-word' }}>{card.title}</div>
 
       {card.tags?.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
           {card.tags.map(t => (
             <span key={t} style={{
-              fontFamily: 'var(--mono)', fontSize: 9, padding: '1px 6px',
+              fontFamily: 'var(--mono)', fontSize: '0.692rem', padding: '1px 6px',
               background: 'var(--bg-0)', border: '1px solid var(--border)',
               borderRadius: 3, color: 'var(--text-2)',
             }}>#{t}</span>
@@ -99,7 +99,7 @@ function Badge({ children, color, truncate }: { children: React.ReactNode; color
   const c = colors[color] || colors.accent;
   return (
     <span style={{
-      fontFamily: 'var(--mono)', fontSize: 9, padding: '1px 6px', borderRadius: 3,
+      fontFamily: 'var(--mono)', fontSize: '0.692rem', padding: '1px 6px', borderRadius: 3,
       display: 'inline-flex', alignItems: 'center', gap: 4,
       background: c.bg, border: `1px solid ${c.border}`, color: c.fg,
       ...(truncate ? { maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const } : {}),

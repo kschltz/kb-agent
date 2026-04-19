@@ -73,7 +73,7 @@ export function ActivityFeed({ refreshTick }: Props) {
         borderBottom: '1px solid var(--border)', flexShrink: 0,
         background: 'var(--bg-1)',
       }}>
-        <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--mono)' }}>
+        <span style={{ fontSize: '0.846rem', color: 'var(--text-2)', fontFamily: 'var(--mono)' }}>
           {loading ? 'loading…' : `${entries.length} events`}
         </span>
         <div style={{ flex: 1 }} />
@@ -83,7 +83,7 @@ export function ActivityFeed({ refreshTick }: Props) {
             key={tr.label}
             onClick={() => setTimeRange(tr.seconds)}
             style={{
-              fontFamily: 'var(--mono)', fontSize: 10, padding: '2px 8px',
+              fontFamily: 'var(--mono)', fontSize: '0.769rem', padding: '2px 8px',
               border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
               background: timeRange === tr.seconds ? 'var(--accent)' : 'var(--bg-2)',
               color: timeRange === tr.seconds ? '#fff' : 'var(--text-1)',
@@ -95,7 +95,7 @@ export function ActivityFeed({ refreshTick }: Props) {
           value={actionFilter}
           onChange={e => setActionFilter(e.target.value)}
           style={{
-            fontFamily: 'var(--mono)', fontSize: 10, padding: '2px 6px',
+            fontFamily: 'var(--mono)', fontSize: '0.769rem', padding: '2px 6px',
             border: '1px solid var(--border)', borderRadius: 3,
             background: 'var(--bg-2)', color: 'var(--text-1)',
           }}
@@ -108,7 +108,7 @@ export function ActivityFeed({ refreshTick }: Props) {
       {/* Feed list */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
         {entries.length === 0 && !loading && (
-          <div style={{ textAlign: 'center', color: 'var(--text-2)', fontSize: 12, marginTop: 40 }}>
+          <div style={{ textAlign: 'center', color: 'var(--text-2)', fontSize: '0.923rem', marginTop: 40 }}>
             No activity in this time range.
           </div>
         )}
@@ -117,9 +117,9 @@ export function ActivityFeed({ refreshTick }: Props) {
             display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 16px',
             overflow: 'hidden',
             borderBottom: '1px solid var(--bg-0)',
-            fontSize: 11, fontFamily: 'var(--mono)',
+            fontSize: '0.846rem', fontFamily: 'var(--mono)',
           }}>
-            <span style={{ flexShrink: 0, width: 80, fontSize: 10, color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{fmtFull(e.ts)}</span>
+            <span style={{ flexShrink: 0, width: 80, fontSize: '0.769rem', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{fmtFull(e.ts)}</span>
             <span style={{ flexShrink: 0, width: 90, color: actionColor(e.action), fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {e.action}
             </span>

@@ -19,9 +19,12 @@ export function Board({ board, onCardClick, send }: BoardProps) {
     const activeType = active.data.current?.type as string | undefined;
 
     if (activeType === 'lane') {
-      // Lane reordering
-      const fromName = active.data.current?.laneName as string;
-      const toName = over.data.current?.laneName as string;
+      // Lane reordering. `over` may resolve to either the lane sortable wrapper
+      // (id: lane.name) or its inner droppable (id: `lane-<name>`), so derive
+      // the target lane name from over.id directly.
+      const fromName = active.data.current?.laneName as string | undefined;
+      const overId = String(over.id);
+      const toName = overId.startsWith('lane-') ? overId.slice(5) : overId;
       if (!fromName || !toName || fromName === toName) return;
       const oldIndex = laneNames.indexOf(fromName);
       const newIndex = laneNames.indexOf(toName);

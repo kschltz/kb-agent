@@ -91,12 +91,12 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
           background: 'var(--bg-2)', flexShrink: 0,
         }}>
           <div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)' }}>#{card.id}</div>
-            <h2 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)', marginTop: 4 }}>{card.title}</h2>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: '0.846rem', color: 'var(--text-2)' }}>#{card.id}</div>
+            <h2 style={{ fontSize: '1.154rem', fontWeight: 600, color: 'var(--text-0)', marginTop: 4 }}>{card.title}</h2>
           </div>
           <button onClick={onClose} style={{
             background: 'none', border: '1px solid var(--border)', color: 'var(--text-2)',
-            width: 28, height: 28, borderRadius: 4, cursor: 'pointer', fontSize: 14,
+            width: 28, height: 28, borderRadius: 4, cursor: 'pointer', fontSize: '1.077rem',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}>✕</button>
         </div>
@@ -109,16 +109,16 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
               background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.3)',
               borderRadius: 'var(--radius)', padding: '12px 14px', marginBottom: 16,
             }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: '#eab308', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '1px' }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: '0.769rem', fontWeight: 600, color: '#eab308', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '1px' }}>
                 ❓ Agent is asking
               </div>
-              <div style={{ fontSize: 13, color: 'var(--text-0)', marginBottom: 10 }}>{card.pending_question}</div>
+              <div style={{ fontSize: '1rem', color: 'var(--text-0)', marginBottom: 10 }}>{card.pending_question}</div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input value={answerText} onChange={e => setAnswerText(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') sendAnswer(); }}
                   placeholder="Type your answer..."
                   style={{
-                    flex: 1, fontFamily: 'var(--mono)', fontSize: 12, padding: '6px 10px',
+                    flex: 1, fontFamily: 'var(--mono)', fontSize: '0.923rem', padding: '6px 10px',
                     background: 'var(--bg-0)', border: '1px solid var(--border)',
                     borderRadius: 'var(--radius)', color: 'var(--text-0)', outline: 'none',
                   }} />
@@ -134,7 +134,7 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
               borderRadius: 'var(--radius)', padding: '12px 14px', marginBottom: 16,
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
-              <span style={{ fontSize: 12, color: '#eab308' }}>⏳ Pending approval</span>
+              <span style={{ fontSize: '0.923rem', color: '#eab308' }}>⏳ Pending approval</span>
               <button onClick={() => send({ action: 'approve', card_id: card.id })}
                 style={{ ...btnStyle, borderColor: 'var(--accent-dim)', color: 'var(--accent)' }}>Approve</button>
             </div>
@@ -142,9 +142,25 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
 
           {/* Meta */}
           <Section title="Details">
-            <dl style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: '4px 12px', fontSize: 12 }}>
+            <dl style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: '4px 12px', fontSize: '0.923rem' }}>
               <Dt>Lane</Dt><Dd>{card.lane}</Dd>
-              <Dt>Priority</Dt><Dd>{card.priority}</Dd>
+              <Dt>Priority</Dt>
+              <Dd>
+                <select
+                  value={card.priority ?? 2}
+                  onChange={e => send({ action: 'edit', card_id: card.id, priority: Number(e.target.value) })}
+                  style={{
+                    fontFamily: 'var(--mono)', fontSize: '0.923rem',
+                    background: 'var(--bg-0)', border: '1px solid var(--border)',
+                    color: 'var(--text-0)', borderRadius: 'var(--radius)',
+                    padding: '2px 6px', outline: 'none', cursor: 'pointer',
+                  }}>
+                  <option value={0}>P0 (critical)</option>
+                  <option value={1}>P1 (high)</option>
+                  <option value={2}>P2 (normal)</option>
+                  <option value={3}>P3 (low)</option>
+                </select>
+              </Dd>
               <Dt>Blocked</Dt><Dd>{card.blocked ? `Yes — ${card.blocked_reason}` : 'No'}</Dd>
               <Dt>Agent</Dt><Dd>{card.assigned_agent || '—'}</Dd>
               <Dt>Branch</Dt><Dd>{card.branch || '—'}</Dd>
@@ -160,7 +176,7 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
               <div style={{
                 background: 'var(--bg-0)', border: '1px solid var(--border)',
                 borderRadius: 'var(--radius)', padding: 12,
-                fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.6,
+                fontFamily: 'var(--mono)', fontSize: '0.846rem', lineHeight: 1.6,
                 whiteSpace: 'pre', overflowX: 'auto', color: 'var(--text-1)',
                 maxHeight: diffHtml ? 600 : 400, overflowY: 'auto',
               }} dangerouslySetInnerHTML={{ __html: diffHtml || escapeHtml(card.diff_stat) }} />
@@ -179,23 +195,23 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
                 {card.history.slice(-50).map((e, i) => (
                   <div key={i} style={{
                     display: 'flex', gap: 10, padding: '5px 8px',
-                    borderRadius: 4, fontSize: 12, lineHeight: 1.4,
+                    borderRadius: 4, fontSize: '0.923rem', lineHeight: 1.4,
                   }}>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-2)', whiteSpace: 'nowrap', minWidth: 60, paddingTop: 1 }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: '0.769rem', color: 'var(--text-2)', whiteSpace: 'nowrap', minWidth: 60, paddingTop: 1 }}>
                       {fmtTime(e.ts)}
                     </span>
                     <span style={{
                       width: 6, height: 6, borderRadius: '50%', marginTop: 5, flexShrink: 0,
                       background: e.role === 'human' ? 'var(--accent)' : e.role === 'agent' ? 'var(--blue)' : 'var(--text-2)',
                     }} />
-                    <div style={{ flex: 1, color: 'var(--text-1)', fontSize: 12 }}>
+                    <div style={{ flex: 1, color: 'var(--text-1)', fontSize: '0.923rem' }}>
                       <span style={{
-                        fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
+                        fontFamily: 'var(--mono)', fontSize: '0.692rem', fontWeight: 600,
                         textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: 6,
                         color: e.role === 'human' ? 'var(--accent)' : e.role === 'agent' ? 'var(--blue)' : 'var(--text-2)',
                       }}>{e.role}</span>
                       <span style={{
-                        fontFamily: 'var(--mono)', fontSize: 9, marginRight: 6,
+                        fontFamily: 'var(--mono)', fontSize: '0.692rem', marginRight: 6,
                         color: e.action === 'gate_fail' ? 'var(--danger)' : e.action === 'gate_pass' ? 'var(--accent)' : e.action === 'ask' ? '#eab308' : e.action === 'answer' ? 'var(--accent)' : 'var(--text-2)',
                       }}>{e.action}</span>
                       {e.content}
@@ -211,7 +227,7 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
             <div style={{ display: 'flex', gap: 6 }}>
               <input ref={noteRef} placeholder="Type a note for the agent..." onKeyDown={e => { if (e.key === 'Enter') sendNote(); }}
                 style={{
-                  flex: 1, fontFamily: 'var(--mono)', fontSize: 12, padding: '6px 10px',
+                  flex: 1, fontFamily: 'var(--mono)', fontSize: '0.923rem', padding: '6px 10px',
                   background: 'var(--bg-0)', border: '1px solid var(--border)',
                   borderRadius: 'var(--radius)', color: 'var(--text-0)', outline: 'none',
                 }} />
@@ -227,7 +243,7 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
                   onKeyDown={e => { if (e.key === 'Enter') sendAsk(); }}
                   placeholder="Ask the agent..."
                   style={{
-                    flex: 1, fontFamily: 'var(--mono)', fontSize: 12, padding: '6px 10px',
+                    flex: 1, fontFamily: 'var(--mono)', fontSize: '0.923rem', padding: '6px 10px',
                     background: 'var(--bg-0)', border: '1px solid var(--border)',
                     borderRadius: 'var(--radius)', color: 'var(--text-0)', outline: 'none',
                   }} />
@@ -266,7 +282,7 @@ export function CardDetail({ card, laneNames, onClose, send }: CardDetailProps) 
 }
 
 const btnStyle: React.CSSProperties = {
-  fontFamily: 'var(--mono)', fontSize: 11, padding: '5px 12px',
+  fontFamily: 'var(--mono)', fontSize: '0.846rem', padding: '5px 12px',
   borderRadius: 'var(--radius)', cursor: 'pointer',
   border: '1px solid var(--border)', background: 'var(--bg-3)', color: 'var(--text-1)',
 };
@@ -275,7 +291,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{
-        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        fontFamily: 'var(--mono)', fontSize: '0.769rem', fontWeight: 600,
         textTransform: 'uppercase', letterSpacing: '1.5px', color: 'var(--text-2)',
         marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid var(--border)',
       }}>{title}</div>
@@ -285,11 +301,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function Dt({ children }: { children: React.ReactNode }) {
-  return <dt style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)' }}>{children}</dt>;
+  return <dt style={{ fontFamily: 'var(--mono)', fontSize: '0.846rem', color: 'var(--text-2)' }}>{children}</dt>;
 }
 
 function Dd({ children }: { children: React.ReactNode }) {
-  return <dd style={{ color: 'var(--text-0)', fontFamily: 'var(--mono)', fontSize: 11, wordBreak: 'break-all' }}>{children}</dd>;
+  return <dd style={{ color: 'var(--text-0)', fontFamily: 'var(--mono)', fontSize: '0.846rem', wordBreak: 'break-all' }}>{children}</dd>;
 }
 
 function escapeHtml(s: string): string {

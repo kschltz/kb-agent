@@ -69,7 +69,7 @@ export function ActivityBar({ board, onCardClick }: ActivityBarProps) {
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '6px 20px', background: 'var(--bg-1)',
         borderTop: '1px solid var(--border)',
-        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-2)',
+        fontFamily: 'var(--mono)', fontSize: '0.769rem', color: 'var(--text-2)',
         flexShrink: 0, overflow: 'hidden',
       }}>
         <span>activity:</span>
@@ -84,7 +84,7 @@ export function ActivityBar({ board, onCardClick }: ActivityBarProps) {
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '6px 20px', background: 'var(--bg-1)',
         borderTop: '1px solid var(--border)',
-        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-2)',
+        fontFamily: 'var(--mono)', fontSize: '0.769rem', color: 'var(--text-2)',
         flexShrink: 0, overflow: 'hidden', cursor: 'pointer',
       }}>
         <span style={{ color: 'var(--text-2)' }}>activity:</span>
@@ -93,7 +93,7 @@ export function ActivityBar({ board, onCardClick }: ActivityBarProps) {
           [{lastEvent.card_id}] {(lastEvent.content || '').substring(0, 100)}
         </span>
         <span style={{ color: 'var(--text-2)', opacity: 0.5, flexShrink: 0 }}>{fmtTime(lastEvent.ts)}</span>
-        <span style={{ color: 'var(--text-2)', opacity: 0.5, flexShrink: 0, fontSize: 8 }}>&#9650; expand</span>
+        <span style={{ color: 'var(--text-2)', opacity: 0.5, flexShrink: 0, fontSize: '0.615rem' }}>&#9650; expand</span>
       </div>
     );
   }
@@ -108,13 +108,13 @@ export function ActivityBar({ board, onCardClick }: ActivityBarProps) {
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '6px 12px', borderBottom: '1px solid var(--border)',
-        fontFamily: 'var(--mono)', fontSize: 10,
+        fontFamily: 'var(--mono)', fontSize: '0.769rem',
       }}>
         <span style={{ color: 'var(--text-2)', fontWeight: 600 }}>ACTIVITY</span>
         <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
           {(['all', 'human', 'agent'] as const).map(f => (
             <button key={f} onClick={() => setFilter(f)} style={{
-              fontFamily: 'var(--mono)', fontSize: 9, padding: '2px 6px',
+              fontFamily: 'var(--mono)', fontSize: '0.692rem', padding: '2px 6px',
               borderRadius: 3, cursor: 'pointer',
               border: filter === f ? '1px solid var(--accent-dim)' : '1px solid var(--border)',
               background: filter === f ? 'var(--accent-glow)' : 'var(--bg-0)',
@@ -124,7 +124,7 @@ export function ActivityBar({ board, onCardClick }: ActivityBarProps) {
         </div>
         <span style={{ flex: 1 }} />
         <button onClick={() => setExpanded(false)} style={{
-          fontFamily: 'var(--mono)', fontSize: 9, padding: '2px 6px',
+          fontFamily: 'var(--mono)', fontSize: '0.692rem', padding: '2px 6px',
           borderRadius: 3, cursor: 'pointer',
           border: '1px solid var(--border)', background: 'var(--bg-0)', color: 'var(--text-2)',
         }}>&#9660; collapse</button>
@@ -133,20 +133,20 @@ export function ActivityBar({ board, onCardClick }: ActivityBarProps) {
       {/* Events */}
       <div style={{ overflowY: 'auto', padding: '4px 12px' }}>
         {displayed.length === 0 && (
-          <div style={{ padding: '8px 0', fontSize: 10, color: 'var(--text-2)' }}>No events</div>
+          <div style={{ padding: '8px 0', fontSize: '0.769rem', color: 'var(--text-2)' }}>No events</div>
         )}
         {displayed.map((e, i) => (
           <div key={i} onClick={() => onCardClick?.(e.card_id)} style={{
             display: 'flex', gap: 8, padding: '3px 6px', borderRadius: 3,
-            fontSize: 11, cursor: onCardClick ? 'pointer' : 'default',
+            fontSize: '0.846rem', cursor: onCardClick ? 'pointer' : 'default',
           }}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-2)', whiteSpace: 'nowrap', minWidth: 44, paddingTop: 1 }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: '0.692rem', color: 'var(--text-2)', whiteSpace: 'nowrap', minWidth: 44, paddingTop: 1 }}>
               {fmtTime(e.ts)}
             </span>
             <span style={{
-              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600, color: 'var(--text-2)', minWidth: 28,
+              fontFamily: 'var(--mono)', fontSize: '0.692rem', fontWeight: 600, color: 'var(--text-2)', minWidth: 28,
             }}>#{e.card_id}</span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: actionColor(e.action) }}>{e.action}</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: '0.692rem', color: actionColor(e.action) }}>{e.action}</span>
             <span style={{ color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
               {e.content.substring(0, 120)}
             </span>

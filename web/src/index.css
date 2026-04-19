@@ -24,16 +24,18 @@
   --sans: 'IBM Plex Sans', sans-serif;
   --radius: 6px;
   --lane-gap: 12px;
+  --font-scale: 1;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; overflow: hidden; }
 
+html { font-size: calc(13px * var(--font-scale)); }
+
 body {
   font-family: var(--sans);
   background: var(--bg-0);
   color: var(--text-0);
-  font-size: 13px;
   line-height: 1.5;
 }
 

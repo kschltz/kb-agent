@@ -41,7 +41,7 @@ export function ToastContainer({ lastResult }: ToastProps) {
     }}>
       {toasts.map(t => (
         <div key={t.id} style={{
-          fontFamily: 'var(--mono)', fontSize: 12, padding: '8px 14px',
+          fontFamily: 'var(--mono)', fontSize: '0.923rem', padding: '8px 14px',
           borderRadius: 'var(--radius)', border: '1px solid var(--border)',
           background: 'var(--bg-2)', color: 'var(--text-0)', maxWidth: 360,
           ...(t.type === 'error' ? { borderColor: 'var(--danger-dim)', color: 'var(--danger)' } : {}),

@@ -11,9 +11,13 @@ merge_strategy: squash
 # {card_id}, {worktree}, and {branch} are replaced with actual values
 agent_command: "claude --system-prompt \"$(kb context {card_id})\" --cwd {worktree}"
 
+# auto_spawn defaults to TRUE for every lane — moving a card into a lane
+# spawns a fresh sub-agent for that lane. Opt out with `auto_spawn: false`
+# on lanes where no work is done (e.g. backlog, done).
 lanes:
   # Cards start here. No limits — this is the backlog.
   - name: backlog
+    auto_spawn: false
 
   # Active work. max_wip limits total cards, max_parallelism limits
   # how many agents can work simultaneously.
@@ -35,3 +39,4 @@ lanes:
     gate_from_review:
       - "cd $KB_WORKTREE && npm run lint"
     on_enter: merge
+    auto_spawn: false

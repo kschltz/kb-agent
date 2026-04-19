@@ -61,15 +61,15 @@ export function Lane({ lane, onCardClick }: LaneProps) {
             {...attributes}
             title="Drag to reorder lane"
             style={{
-              cursor: 'grab', color: 'var(--text-2)', fontSize: 12,
+              cursor: 'grab', color: 'var(--text-2)', fontSize: '0.923rem',
               lineHeight: 1, userSelect: 'none', opacity: 0.5,
             }}>⠿</span>
           <span style={{
-            fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 11,
+            fontFamily: 'var(--mono)', fontWeight: 600, fontSize: '0.846rem',
             textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-1)',
           }}>{lane.name}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--mono)', fontSize: '0.769rem', color: 'var(--text-2)' }}>
           <span style={{ padding: '1px 6px', background: 'var(--bg-3)', borderRadius: 3 }}>{count}/{maxWip}</span>
           {lane.max_parallelism && <span title="Max parallelism">⊞{lane.max_parallelism}</span>}
           {hasInstructions && (
@@ -81,7 +81,7 @@ export function Lane({ lane, onCardClick }: LaneProps) {
                 border: `1px solid ${showInstructions ? 'var(--border-hi)' : 'transparent'}`,
                 color: showInstructions ? 'var(--blue)' : 'var(--text-2)',
                 borderRadius: 3, cursor: 'pointer',
-                fontFamily: 'var(--mono)', fontSize: 10, padding: '1px 5px',
+                fontFamily: 'var(--mono)', fontSize: '0.769rem', padding: '1px 5px',
                 lineHeight: 1.4,
               }}>ℹ</button>
           )}
@@ -95,7 +95,7 @@ export function Lane({ lane, onCardClick }: LaneProps) {
           maxHeight: 180, overflowY: 'auto',
         }}>
           <pre style={{
-            margin: 0, fontFamily: 'var(--mono)', fontSize: 10,
+            margin: 0, fontFamily: 'var(--mono)', fontSize: '0.769rem',
             color: 'var(--text-1)', lineHeight: 1.6,
             whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           }}>{lane.instructions}</pre>
@@ -114,7 +114,7 @@ export function Lane({ lane, onCardClick }: LaneProps) {
         {lane.cards.length === 0 ? (
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flex: 1, fontFamily: 'var(--mono)', fontSize: 11,
+            flex: 1, fontFamily: 'var(--mono)', fontSize: '0.846rem',
             color: 'var(--text-2)', opacity: 0.5,
           }}>no cards</div>
         ) : (

@@ -35,6 +35,10 @@ export default function App() {
     return isNaN(parsed) ? 1 : parsed;
   });
 
+  useEffect(() => {
+    document.documentElement.style.setProperty('--font-scale', String(zoom));
+  }, [zoom]);
+
   const handleZoomChange = (next: number) => {
     setZoom(next);
     localStorage.setItem('kb-zoom', String(next));
@@ -63,7 +67,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', zoom }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <Header board={board} connected={connected} onAddCard={() => setAddDialogOpen(true)} zoom={zoom} onZoomChange={handleZoomChange} />
 
       {/* Tab bar */}
@@ -76,7 +80,7 @@ export default function App() {
             key={tab}
             onClick={() => setActiveTab(tab)}
             style={{
-              fontFamily: 'var(--mono)', fontSize: 10, padding: '6px 16px',
+              fontFamily: 'var(--mono)', fontSize: '0.769rem', padding: '6px 16px',
               border: 'none', cursor: 'pointer',
               background: activeTab === tab ? 'var(--bg-0)' : 'transparent',
               color: activeTab === tab ? 'var(--accent)' : 'var(--text-2)',
@@ -95,7 +99,7 @@ export default function App() {
           ) : (
             <div style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-2)',
+              fontFamily: 'var(--mono)', fontSize: '0.923rem', color: 'var(--text-2)',
             }}>
               {board?.error || 'connecting...'}
             </div>

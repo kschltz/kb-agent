@@ -22,14 +22,14 @@ export function Header({ board, connected, onAddCard, zoom, onZoomChange }: Head
       borderBottom: '1px solid var(--border)', flexShrink: 0,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 16, letterSpacing: -0.5, color: 'var(--accent)' }}>kb</span>
+        <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: '1.231rem', letterSpacing: -0.5, color: 'var(--accent)' }}>kb</span>
         <span style={{
-          fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-2)',
+          fontFamily: 'var(--mono)', fontSize: '0.923rem', color: 'var(--text-2)',
           padding: '2px 8px', background: 'var(--bg-2)', borderRadius: 3,
           border: '1px solid var(--border)',
         }}>{board?.project || '—'}</span>
         <span style={{
-          fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--blue)',
+          fontFamily: 'var(--mono)', fontSize: '0.846rem', color: 'var(--blue)',
           padding: '2px 8px', background: 'rgba(90,158,240,0.08)',
           border: '1px solid var(--blue-dim)', borderRadius: 3,
         }}>⎇ {board?.base_branch || 'main'}</span>
@@ -41,7 +41,7 @@ export function Header({ board, connected, onAddCard, zoom, onZoomChange }: Head
             disabled={!canDecrease}
             title="Decrease font size"
             style={{
-              fontFamily: 'var(--mono)', fontSize: 12, padding: '4px 8px',
+              fontFamily: 'var(--mono)', fontSize: '0.923rem', padding: '4px 8px',
               background: 'var(--bg-2)', border: '1px solid var(--border)',
               color: canDecrease ? 'var(--text-1)' : 'var(--text-2)',
               borderRadius: 'var(--radius)', cursor: canDecrease ? 'pointer' : 'default',
@@ -51,7 +51,7 @@ export function Header({ board, connected, onAddCard, zoom, onZoomChange }: Head
               onClick={() => onZoomChange(1)}
               title="Reset font size"
               style={{
-                fontFamily: 'var(--mono)', fontSize: 10, padding: '4px 6px',
+                fontFamily: 'var(--mono)', fontSize: '0.769rem', padding: '4px 6px',
                 background: 'var(--bg-2)', border: '1px solid var(--border)',
                 color: 'var(--text-2)', borderRadius: 'var(--radius)', cursor: 'pointer',
               }}>{Math.round(zoom * 100)}%</button>
@@ -61,14 +61,14 @@ export function Header({ board, connected, onAddCard, zoom, onZoomChange }: Head
             disabled={!canIncrease}
             title="Increase font size"
             style={{
-              fontFamily: 'var(--mono)', fontSize: 12, padding: '4px 8px',
+              fontFamily: 'var(--mono)', fontSize: '0.923rem', padding: '4px 8px',
               background: 'var(--bg-2)', border: '1px solid var(--border)',
               color: canIncrease ? 'var(--text-1)' : 'var(--text-2)',
               borderRadius: 'var(--radius)', cursor: canIncrease ? 'pointer' : 'default',
             }}>A+</button>
         </div>
         <button onClick={onAddCard} style={{
-          fontFamily: 'var(--mono)', fontSize: 12, padding: '5px 14px',
+          fontFamily: 'var(--mono)', fontSize: '0.923rem', padding: '5px 14px',
           background: 'var(--bg-2)', border: '1px solid var(--border)',
           color: 'var(--accent)', borderRadius: 'var(--radius)', cursor: 'pointer',
         }}>+ add card</button>
@@ -77,7 +77,7 @@ export function Header({ board, connected, onAddCard, zoom, onZoomChange }: Head
           background: connected ? 'var(--accent)' : 'var(--danger)',
           boxShadow: `0 0 6px ${connected ? 'var(--accent)' : 'var(--danger)'}`,
         }} />
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)' }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: '0.846rem', color: 'var(--text-2)' }}>
           {connected ? 'connected' : 'disconnected'}
         </span>
       </div>

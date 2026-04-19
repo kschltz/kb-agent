@@ -1169,10 +1169,12 @@
                       [true (str "Moved to '" target-lane "'.") gate-results])))))))))))))))
 
 (defn auto-spawn?
-  "Returns truthy if the given lane has auto_spawn configured to true."
+  "Returns truthy if the given lane has auto_spawn configured to true.
+  Defaults to true when the key is absent — lanes must opt out explicitly
+  (e.g. backlog/done) with `auto_spawn: false`."
   [board lane-name]
   (when-let [cfg (lane-by-name board lane-name)]
-    (get cfg "auto_spawn")))
+    (get cfg "auto_spawn" true)))
 
 (defn reject!
   "Move card back to previous lane."
@@ -1472,7 +1474,7 @@
   "Keys allowed inside a lane map."
   #{"name" "max_wip" "max_parallelism" "instructions"
     "requires_approval" "approval_timeout" "approval_timeout_action"
-    "heartbeat_timeout" "on_enter"
+    "heartbeat_timeout" "on_enter" "auto_spawn"
     "min_confidence" "gate_from_backlog" "gate_from_plan"
     "gate_from_in-progress" "gate_from_review" "gate_from_unit-tests"
     "gate_from_discovery" "gate_from_testing" "gate_from_done"})
@@ -2579,14 +2581,15 @@
                        "merge_strategy" "squash"
                        "agent_command"  "claude --system-prompt \"$(kb context {card_id})\" --cwd {worktree}"
                        "lanes"
-                       [{"name" "backlog"}
+                       [{"name" "backlog" "auto_spawn" false}
                         {"name"            "in-progress"
                          "max_wip"         5
                          "max_parallelism" 2}
                         {"name"  "review"
                          "max_wip" 3}
                         {"name"    "done"
-                         "on_enter" "merge"}]})]
+                         "on_enter" "merge"
+                         "auto_spawn" false}]})]
          (u/spit-yaml (u/path-resolve root u/board-file) tmpl)
 
          ;; Add .kanban/ to .gitignore if not already present
