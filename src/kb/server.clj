@@ -166,25 +166,25 @@
 
       "add_lane"
       (let [result (board/add-lane! b lane
-                                     :wip (get cmd "wip")
-                                     :parallelism (get cmd "parallelism")
-                                     :on-enter (get cmd "on_enter")
-                                     :instructions (get cmd "instructions"))]
+                                     :wip (get cmd :wip)
+                                     :parallelism (get cmd :parallelism)
+                                     :on-enter (get cmd :on_enter)
+                                     :instructions (get cmd :instructions))]
         {:success true :message (str "Lane '" lane "' added.")})
 
       "rename_lane"
-      (let [old-name (get cmd "old_name")
-            new-name (get cmd "new_name")]
+      (let [old-name (get cmd :old_name)
+            new-name (get cmd :new_name)]
         (board/rename-lane! b old-name new-name)
         {:success true :message (str "Lane '" old-name "' renamed to '" new-name "'.")})
 
       "remove_lane"
-      (let [move-to (get cmd "move_to")]
+      (let [move-to (get cmd :move_to)]
         (board/remove-lane! b lane :move-to move-to)
         {:success true :message (str "Lane '" lane "' removed.")})
 
       "reorder_lanes"
-      (let [order (get cmd "order")]
+      (let [order (get cmd :order)]
         (board/reorder-lanes! b order)
         {:success true :message "Lanes reordered."})
 
