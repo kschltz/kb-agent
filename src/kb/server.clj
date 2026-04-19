@@ -43,24 +43,6 @@
 
 ;; ── Board state ──────────────────────────────────────────────
 
-(defn- kebab->snake
-  "Convert a kebab-case keyword or string to snake_case string."
-  [k]
-  (-> (if (keyword? k) (name k) (str k))
-      (str/replace "-" "_")))
-
-(defn- to-snake-keys
-  "Recursively convert kebab-case keys to snake_case for JSON serialization."
-  [m]
-  (when (map? m)
-    (into {}
-          (map (fn [[k v]]
-                 [(kebab->snake k)
-                  (cond (map? v)    (to-snake-keys v)
-                        (vector? v) (mapv #(if (map? %) (to-snake-keys %) %) v)
-                        :else       v)]))
-          m)))
-
 (defn get-board-state
   "Returns a map representing the full board state for JSON serialisation.
    Uses all-cards once + group-by to avoid N+1 directory scans per lane."
@@ -73,6 +55,7 @@
           by-lane  (group-by :lane cards)]
       {:project     (get (:config b) "project" "")
        :base_branch (board/base-branch b)
+       :stale_heartbeat_mins (get (:config b) "stale_heartbeat_mins" 10)
        :lanes       (mapv (fn [lane-conf]
                             (let [lane-name (get lane-conf "name")
                                   with-ins (assoc lane-conf
@@ -83,14 +66,13 @@
                                      (mapv (fn [card]
                                              (let [history   (board/load-history b (:id card))
                                                    diff-stat (board/get-diff-stat b (:id card))
-                                                   desc      (board/load-description b (:id card))
-                                                   card-map  (assoc card
-                                                              :history     history
-                                                              :description desc
-                                                              :diff_stat (if (str/includes? diff-stat "(no branch)")
-                                                                           ""
-                                                                           diff-stat))]
-                                               (to-snake-keys card-map)))
+                                                   desc      (board/load-description b (:id card))]
+                                               (assoc card
+                                                      :history     history
+                                                      :description desc
+                                                      :diff_stat (if (str/includes? diff-stat "(no branch)")
+                                                                   ""
+                                                                   diff-stat))))
                                            (get by-lane lane-name [])))))
                           (get (:config b) "lanes" []))
        :timestamp   (util/now-epoch)})

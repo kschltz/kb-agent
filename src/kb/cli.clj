@@ -107,7 +107,7 @@
                          {:ts (u/now-epoch)
                           :role "system"
                           :action "spawned"
-                          :content (str "Sub-agent spawned: " cmd)})
+                          :content (str "Sub-agent spawned: " (u/truncate cmd 200))})
       (println (str "Spawning agent for card " (:id card) "..."))
       (println (str "  Command: " cmd))
       (println (str "  Worktree: " (:worktree card)))
@@ -502,6 +502,73 @@
                 (println))))
           (when (and filtering? (not @any-shown?))
             (println "  no matching cards")))))))
+
+(defn cmd-attention
+  [{:keys [opts]}]
+  (let [board (b/make-board)
+        all-cards (b/all-cards board)
+        stale-threshold-mins (get (:config board) "stale_heartbeat_mins" 10)
+        stale-threshold-ms (* stale-threshold-mins 60 1000)
+        now (u/now-epoch)
+        
+        ;; Groupings
+        pending-question (filter #(not (str/blank? (:pending-question %))) all-cards)
+        ;; Exclude pending questions from blocked so they aren't duplicated
+        blocked (filter #(and (:blocked %) (str/blank? (:pending-question %))) all-cards)
+        pending-approval (filter :pending-approval all-cards)
+        stale-heartbeat (filter (fn [c]
+                                  (and (not (str/blank? (:assigned-agent c)))
+                                       (not (:blocked c))
+                                       (not (:pending-approval c))
+                                       (not (str/blank? (:lane c)))
+                                       (not= (:lane c) "done")
+                                       (let [last-hb (or (:last-heartbeat c) (:updated-at c) (:created-at c))]
+                                         (> (- now last-hb) stale-threshold-ms))))
+                                all-cards)]
+    
+    (if (:json opts)
+      (let [fmt-card (fn [c reason]
+                       (cond-> {:id (:id c)
+                                :title (:title c)
+                                :lane (:lane c)
+                                :reason reason}
+                         (:pending-question c) (assoc :question (:pending-question c))))
+            out {:blocked (mapv #(fmt-card % (:blocked-reason %)) blocked)
+                 :pending_question (mapv #(fmt-card % (:pending-question %)) pending-question)
+                 :pending_approval (mapv #(fmt-card % "Pending approval") pending-approval)
+                 :stale_heartbeat (mapv (fn [c]
+                                          (let [last-hb (or (:last-heartbeat c) (:updated-at c) (:created-at c))
+                                                mins (int (/ (- now last-hb) 60000))]
+                                            (fmt-card c (str "Last heartbeat " mins "m ago"))))
+                                        stale-heartbeat)}]
+        (println (json/generate-string out {:pretty true})))
+      
+      (do
+        (when (seq blocked)
+          (println (str "🛑 Blocked (" (count blocked) ")"))
+          (doseq [c blocked]
+            (println (str "  [" (:id c) "] " (:title c) " — reason: " (:blocked-reason c))))
+          (println))
+          
+        (when (seq pending-question)
+          (println (str "❓ Pending question (" (count pending-question) ")"))
+          (doseq [c pending-question]
+            (println (str "  [" (:id c) "] " (:title c) " — \"" (:pending-question c) "\"")))
+          (println))
+          
+        (when (seq pending-approval)
+          (println (str "✋ Pending approval (" (count pending-approval) ")"))
+          (doseq [c pending-approval]
+            (println (str "  [" (:id c) "] " (:title c) " — pending approval in " (:lane c))))
+          (println))
+          
+        (when (seq stale-heartbeat)
+          (println (str "💤 Stale heartbeat (>" stale-threshold-mins "m) (" (count stale-heartbeat) ")"))
+          (doseq [c stale-heartbeat]
+            (let [last-hb (or (:last-heartbeat c) (:updated-at c) (:created-at c))
+                  mins (int (/ (- now last-hb) 60000))]
+              (println (str "  [" (:id c) "] " (:title c) " — last heartbeat " mins "m ago"))))
+          (println))))))
 
 (defn cmd-split
   [{:keys [opts]}]
@@ -1214,6 +1281,7 @@
            :tag     {:desc "Filter by tag" :type :string}
            :agent   {:desc "Filter by assigned agent" :type :string}
            :blocked {:desc "Show only blocked cards" :type :bool}}}
+   {:cmds ["attention"] :fn cmd-attention}
    {:cmds ["context"] :fn cmd-context :args->opts [:card-id]
     :opts {:compact {:desc "Permanently compress older history entries"
                      :type :bool}

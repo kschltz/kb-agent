@@ -88,13 +88,24 @@
         (Files/deleteIfExists tmp)
         (throw e)))))
 
+(defn truncate
+  "Truncate string s to at most max-len characters, appending '...' if truncated."
+  [s max-len]
+  (let [s (str s)]
+    (if (<= (count s) max-len)
+      s
+      (str (subs s 0 (- max-len 3)) "..."))))
+
 (defn flock-append!
   "Append a line to a file with flock-based locking via shell flock.
-   The >> operator creates the file if it doesn't exist, so no pre-check needed."
+   Uses stdin piping to avoid shell injection and data corruption
+   from embedding JSON in shell commands. The >> operator creates
+   the file if it doesn't exist."
   [path line]
   (let [f (str path)]
-    (apply proc/shell {:out :string :err :string :continue true}
-           ["flock" f "sh" "-c" (str "printf '%s\\n' " (pr-str line) " >> " (pr-str f))])))
+    (proc/shell {:out :string :err :string :continue true
+                 :in (str line "\n")}
+                "flock" f "sh" "-c" (str "cat >> " (pr-str f)))))
 
 ;; ── Git helpers ──────────────────────────────────────────────
 
