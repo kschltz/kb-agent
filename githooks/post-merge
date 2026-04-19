@@ -1,0 +1,4 @@
+#!/bin/bash
+# Rebuild the web UI frontend after merges/pulls,
+# so kb serve always serves the latest bundle.
+cd web && npm run build > /dev/null 2>&1 &
