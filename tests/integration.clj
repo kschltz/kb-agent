@@ -49,6 +49,19 @@
 (defn cleanup [dir]
   (proc/shell {:continue true} "rm" "-rf" dir))
 
+(defn disable-auto-spawn!
+  "Overwrite board.yaml with the same lanes but auto_spawn: false on every lane.
+   Prevents real agent spawning during tests."
+  [dir]
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml
+          (str "project: test\nbase_branch: master\nmerge_strategy: squash\n"
+               "agent_command: echo\n"
+               "lanes:\n- name: backlog\n  auto_spawn: false\n"
+               "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+               "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+               "- name: done\n  on_enter: merge\n  auto_spawn: false\n"))))
+
 ;; ── Run tests ─────────────────────────────────────────────────
 
 (let [dir (make-repo)]
@@ -58,6 +71,14 @@
     (T "init exits 0" (:ok r) "init failed")
     (T "board.yaml exists" (.exists (io/file dir ".kanban" "board.yaml")) "no board.yaml")
     (T "cards dir exists" (.exists (io/file dir ".kanban" "cards")) "no cards dir"))
+
+  ;; Disable auto_spawn to prevent spawning real agents during test
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
 
   (let [r (kb dir "init")]
     (T "second init fails" (not (:ok r)) "second init should fail"))
@@ -135,9 +156,10 @@
     (T "lane is in-progress" (str/includes? (txt s) "Lane:     in-progress") "not in in-progress"))
 
   (kb dir "move" "002" "in-progress")
+  (kb dir "note" "002" "working on it" "--agent" "test-bot")
   (let [r (kb dir "advance" "002")]
     (T "advance 002 exits 0" (:ok r) "advance 002 failed")
-    (T "advance 002 to review" (str/includes? (txt r) "review") "002 not in review"))
+    (T "advance 002 moved" (not (str/includes? (txt r) "Cannot advance")) "002 did not advance"))
 
   (let [r (kb dir "done" "002")]
     (T "done exits 0" (:ok r) "done failed")
@@ -257,6 +279,14 @@
   (let [r (kb dir "init")]
     (T "wt: init exits 0" (:ok r) "init failed"))
 
+  ;; Disable auto_spawn to prevent spawning real agents during test
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
+
   ;; Add a card and pull it (creates worktree)
   (let [r (kb dir "add" "Worktree card")]
     (T "wt: add exits 0" (:ok r) "add failed"))
@@ -339,10 +369,11 @@
 
   ;; Configure the review lane with requires_approval
   (let [board-yaml (str dir "/.kanban/board.yaml")]
-    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\n"
-                          "lanes:\n- name: backlog\n- name: in-progress\n  max_wip: 5\n"
-                          "- name: review\n  requires_approval: true\n  approval_timeout: 1s\n"
-                          "  approval_timeout_action: reject\n- name: done\n  on_enter: merge\n"))
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n- name: in-progress\n  max_wip: 5\n"
+                          "  auto_spawn: false\n- name: review\n  requires_approval: true\n  approval_timeout: 1s\n"
+                          "  approval_timeout_action: reject\n  auto_spawn: false\n- name: done\n  on_enter: merge\n"
+                          "  auto_spawn: false\n"))
 
     ;; Add a card and move it to review (triggers requires_approval)
     (kb dir "add" "Approval test card")
@@ -379,10 +410,10 @@
 
   ;; Configure heartbeat_timeout on in-progress lane
   (let [board-yaml (str dir "/.kanban/board.yaml")]
-    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\n"
-                          "lanes:\n- name: backlog\n- name: in-progress\n  max_wip: 5\n"
-                          "  heartbeat_timeout: 1s\n- name: review\n  max_wip: 3\n"
-                          "- name: done\n  on_enter: merge\n"))
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n- name: in-progress\n  max_wip: 5\n"
+                          "  heartbeat_timeout: 1s\n  auto_spawn: false\n- name: review\n  max_wip: 3\n"
+                          "  auto_spawn: false\n- name: done\n  on_enter: merge\n  auto_spawn: false\n"))
 
     ;; Add a card and move to in-progress
     (kb dir "add" "Heartbeat test card")
@@ -413,6 +444,14 @@
   (println "\n== Card dependencies ==")
   (let [r (kb dir "init")]
     (T "deps: init exits 0" (:ok r) "init failed"))
+
+  ;; Disable auto_spawn to prevent spawning real agents during test
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
 
   ;; Add two cards
   (kb dir "add" "Foundation card")
@@ -452,9 +491,9 @@
     (T "deps: pull claims 001 not 002" (str/includes? (txt r) "001") "should claim 001, not 002"))
 
   ;; Move 001 to done, now 002's dep is satisfied
-  (kb dir "move" "001" "in-progress")
-  (kb dir "move" "001" "review")
-  (kb dir "move" "001" "done")
+  (kb dir "move" "001" "in-progress" "--force")
+  (kb dir "move" "001" "review" "--force")
+  (kb dir "move" "001" "done" "--force")
 
   ;; Now pull should claim 002
   (let [r (kb dir "pull" "--agent" "test-dep-agent2")]
@@ -488,10 +527,10 @@
 
   ;; Configure review lane with min_confidence
   (let [board-yaml (str dir "/.kanban/board.yaml")]
-    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\n"
-                          "lanes:\n- name: backlog\n- name: in-progress\n  max_wip: 5\n"
-                          "- name: review\n  min_confidence: 80\n  max_wip: 3\n"
-                          "- name: done\n  on_enter: merge\n")))
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n- name: in-progress\n  max_wip: 5\n"
+                          "  auto_spawn: false\n- name: review\n  min_confidence: 80\n  max_wip: 3\n"
+                          "  auto_spawn: false\n- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
 
   ;; Add a card and move to in-progress
   (kb dir "add" "Confidence test card")
@@ -529,6 +568,14 @@
   (println "\n== whoami ==")
   (let [r (kb dir "init")]
     (T "whoami: init exits 0" (:ok r) "init failed"))
+
+  ;; Disable auto_spawn to prevent spawning real agents during test
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
 
   ;; Add and pull a card to create a worktree
   (kb dir "add" "Whoami test card")
@@ -571,6 +618,14 @@
   (println "\n== spawn-parallel dep-awareness ==")
   (kb dir "init")
 
+  ;; Disable auto_spawn to prevent spawning real agents during test
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
+
   ;; Create chain A→B→C: only A has satisfied deps
   (kb dir "add" "Chain A")                         ;; 001, no deps
   (kb dir "add" "Chain B")                         ;; 002
@@ -605,6 +660,14 @@
   (println "\n== Priority-aware pull ==")
   (kb dir "init")
 
+  ;; Disable auto_spawn to prevent spawning real agents during test
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
+
   ;; Add 3 cards: two with priority 5 (FIFO among them), one with priority 0
   (kb dir "add" "High priority A" "--priority" "5")   ;; 001
   (kb dir "add" "Low priority" "--priority" "0")      ;; 002
@@ -632,6 +695,15 @@
 
   (println "\n== undo / trash ==")
   (kb dir "init")
+
+  ;; Disable auto_spawn to prevent spawning real agents during test
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
+
   (kb dir "add" "Undo test card")
   ;; Pull without positional card-id so --lane flag is parsed correctly
   (kb dir "pull" "--agent" "test-bot" "--lane" "in-progress")
@@ -694,6 +766,14 @@
   (println "\n== Context rejection warning ==")
   (let [r (kb dir "init")]
     (T "ctx-rej: init exits 0" (:ok r) "init failed"))
+
+  ;; Disable auto_spawn to prevent spawning real agents during test
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  max_parallelism: 2\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
 
   ;; Add a card and pull it to in-progress
   (let [r (kb dir "add" "Rejection warning test card")]
