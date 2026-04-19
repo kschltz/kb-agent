@@ -6,8 +6,33 @@
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [org.httpkit.server :as hk])
   (:import [java.nio.file Path Files]))
+
+;; ── JSON key normalization ───────────────────────────────────
+
+(defn- ->snake
+  "Convert a keyword or string key from kebab-case to snake_case.
+   Returns other values unchanged so postwalk can pass through non-keys."
+  [k]
+  (cond
+    (keyword? k) (keyword (str/replace (name k) \- \_))
+    (string? k)  (str/replace k \- \_)
+    :else        k))
+
+(defn- snake-keys
+  "Recursively rewrite all map keys from kebab-case to snake_case.
+   Frontend expects snake_case; card maps loaded from YAML preserve kebab."
+  [form]
+  (walk/postwalk
+   (fn [x] (if (map? x) (into {} (map (fn [[k v]] [(->snake k) v])) x) x))
+   form))
+
+(defn- to-json
+  "Serialize a Clojure value to JSON with keys normalized to snake_case."
+  [v]
+  (json/generate-string (snake-keys v)))
 
 ;; ── MIME types ───────────────────────────────────────────────
 
@@ -252,8 +277,8 @@
            (fn [ch]
              (add-client! ch)
              ;; Send current board state on connect
-             (hk/send! ch (json/generate-string {:type "state"
-                                                  :data (get-board-state kanban-root)})))
+             (hk/send! ch (to-json {:type "state"
+                                    :data (get-board-state kanban-root)})))
 
            :on-receive
            (fn [ch raw-msg]
@@ -261,13 +286,13 @@
                (let [cmd    (json/parse-string raw-msg true)
                      result (handle-ui-command cmd)]
                  ;; Send command result back to this client
-                 (hk/send! ch (json/generate-string {:type "result" :data result}))
+                 (hk/send! ch (to-json {:type "result" :data result}))
                  ;; Broadcast updated state to all connected clients
-                 (broadcast! (json/generate-string {:type "state"
-                                                     :data (get-board-state kanban-root)})))
+                 (broadcast! (to-json {:type "state"
+                                       :data (get-board-state kanban-root)})))
                (catch Exception e
-                 (hk/send! ch (json/generate-string {:type "error"
-                                                      :data (.getMessage e)})))))
+                 (hk/send! ch (to-json {:type "error"
+                                        :data (.getMessage e)})))))
 
            :on-close
            (fn [ch _status]
@@ -277,7 +302,7 @@
         (= uri "/api/state")
         {:status  200
          :headers {"Content-Type" "application/json"}
-         :body    (json/generate-string (get-board-state kanban-root))}
+         :body    (to-json (get-board-state kanban-root))}
 
         ;; REST: GET /api/activity
         (= uri "/api/activity")
@@ -295,7 +320,7 @@
           {:status  200
            :headers {"Content-Type" "application/json"
                      "Access-Control-Allow-Origin" "*"}
-           :body    (json/generate-string {:entries entries})})
+           :body    (to-json {:entries entries})})
 
         ;; REST: GET /api/cards/:id/diff
         (and (str/starts-with? uri "/api/cards/")
@@ -305,11 +330,11 @@
             (let [b (board/make-board kanban-root)]
               {:status  200
                :headers {"Content-Type" "application/json"}
-               :body    (json/generate-string {:card_id card-id
-                                                :diff    (board/get-diff b card-id)})})
+               :body    (to-json {:card_id card-id
+                                  :diff    (board/get-diff b card-id)})})
             {:status 400
              :headers {"Content-Type" "application/json"}
-             :body    (json/generate-string {:error "Invalid card ID"})}))
+             :body    (to-json {:error "Invalid card ID"})}))
 
         ;; Root / index
         (contains? #{"/" "/index.html"} uri)
@@ -371,8 +396,8 @@
       (let [current (scan-dir kanban-root)]
         (when (not= current last-snapshot)
           (try
-            (broadcast! (json/generate-string {:type "state"
-                                               :data (get-board-state (str kanban-root))}))
+            (broadcast! (to-json {:type "state"
+                                  :data (get-board-state (str kanban-root))}))
             (catch Exception _)))
         (recur current)))))
 

@@ -1,6 +1,7 @@
 export interface BoardState {
   project: string;
   base_branch: string;
+  stale_heartbeat_mins: number;
   lanes: Lane[];
   timestamp: number;
   error?: string;

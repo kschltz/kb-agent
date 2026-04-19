@@ -178,6 +178,7 @@ Auto-opens the browser. Serves a live board view at `http://localhost:8741` with
 - Drag-and-drop card transitions (runs gates server-side) — drag handle (⠿) separate from click-to-open
 - Card detail panel with conversation history and diff viewer
 - Real-time updates via WebSocket
+- **Needs Attention** dashboard: surfaces blocked cards, pending questions, pending approvals, and stale heartbeats at the top of the board
 - Add cards, notes, block/unblock from the browser
 - Lane management: add, rename, reorder (drag), and delete lanes
 - Lane instructions displayed under each lane header (collapsible)

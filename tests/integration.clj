@@ -845,6 +845,84 @@
   (println "\n== doctor cleanup ==")
   (cleanup dir))
 
+(println "\n== kb attention ==")
+(let [dir (make-repo)]
+  (let [r (kb dir "init")]
+    (T "att: init exits 0" (:ok r) "init failed"))
+
+  ;; Configure board with stale_heartbeat_mins: 0 so any elapsed time is stale,
+  ;; and a review lane with requires_approval so we can test pending approval.
+  (let [board-yaml (str dir "/.kanban/board.yaml")]
+    (spit board-yaml (str "project: test\nbase_branch: master\nmerge_strategy: squash\n"
+                          "agent_command: echo\n"
+                          "stale_heartbeat_mins: 0\n"
+                          "lanes:\n- name: backlog\n  auto_spawn: false\n"
+                          "- name: in-progress\n  max_wip: 5\n  auto_spawn: false\n"
+                          "- name: review\n  max_wip: 3\n  requires_approval: true\n  auto_spawn: false\n"
+                          "- name: done\n  on_enter: merge\n  auto_spawn: false\n")))
+
+  ;; Empty board (nothing needing attention)
+  (let [r (kb dir "attention")]
+    (T "att: empty exits 0" (:ok r) "attention failed on empty board")
+    (T "att: empty has no output" (str/blank? (txt r)) (str "expected empty, got: " (txt r))))
+
+  ;; Blocked card
+  (kb dir "add" "Blocked card")
+  (kb dir "block" "001" "--reason" "waiting on design")
+  (let [r (kb dir "attention")]
+    (T "att: blocked exits 0" (:ok r) "attention failed with blocked card")
+    (T "att: shows blocked section" (str/includes? (txt r) "Blocked") "no Blocked section")
+    (T "att: shows blocked card id" (str/includes? (txt r) "001") "001 missing")
+    (T "att: shows blocked reason" (str/includes? (txt r) "waiting on design") "reason missing"))
+
+  ;; Pending question (should appear in its own section, not duplicated under blocked)
+  (kb dir "add" "Question card")
+  (kb dir "ask" "002" "Which framework?" "--agent" "test-bot")
+  (let [r (kb dir "attention")]
+    (T "att: shows pending question" (str/includes? (txt r) "Pending question") "no pending question section")
+    (T "att: shows question text" (str/includes? (txt r) "Which framework?") "question missing")
+    (T "att: question not duplicated in blocked" (not (str/includes? (txt r) "  [002] Question card — reason:"))
+       "question card wrongly duplicated under blocked"))
+
+  ;; Pending approval — move a card to review to trigger auto-approval-block
+  (kb dir "add" "Approval card")
+  (kb dir "move" "003" "in-progress")
+  (kb dir "note" "003" "ready for review" "--agent" "test-bot")
+  (kb dir "move" "003" "review" "--force")
+  (let [r (kb dir "attention")]
+    (T "att: shows pending approval" (str/includes? (txt r) "Pending approval") "no pending approval section")
+    (T "att: shows approval card id" (str/includes? (txt r) "[003]") "003 missing from approval"))
+
+  ;; Stale heartbeat — card with agent assigned, stale_heartbeat_mins: 0 makes any card stale
+  (kb dir "add" "Stale card")
+  (kb dir "pull" "--agent" "stale-bot" "--lane" "in-progress")
+  ;; Wait 1s to ensure at least 1 minute floor? No — stale_heartbeat_mins: 0 means
+  ;; any non-zero elapsed time is stale. Small sleep for safety.
+  (Thread/sleep 100)
+  (let [r (kb dir "attention")]
+    (T "att: shows stale heartbeat" (str/includes? (txt r) "Stale heartbeat") "no stale section"))
+
+  ;; JSON output
+  (let [r (kb dir "attention" "--json")]
+    (T "att: --json exits 0" (:ok r) "attention --json failed")
+    (let [parsed (try (cheshire/parse-string (txt r) true)
+                      (catch Exception _ nil))]
+      (T "att: --json parseable" (some? parsed) "invalid json")
+      (T "att: --json has blocked key" (contains? parsed :blocked) "missing blocked key")
+      (T "att: --json has pending_question key" (contains? parsed :pending_question) "missing pending_question key")
+      (T "att: --json has pending_approval key" (contains? parsed :pending_approval) "missing pending_approval key")
+      (T "att: --json has stale_heartbeat key" (contains? parsed :stale_heartbeat) "missing stale_heartbeat key")
+      (T "att: --json blocked has entry" (= 1 (count (:blocked parsed))) "blocked count wrong")
+      (T "att: --json pending_question has entry" (= 1 (count (:pending_question parsed))) "pending_question count wrong")
+      (T "att: --json pending_approval has entry" (= 1 (count (:pending_approval parsed))) "pending_approval count wrong")
+      (let [b (first (:blocked parsed))]
+        (T "att: --json blocked entry has id" (= "001" (:id b)) "blocked id wrong")
+        (T "att: --json blocked entry has title" (= "Blocked card" (:title b)) "blocked title wrong")
+        (T "att: --json blocked entry has reason" (= "waiting on design" (:reason b)) "blocked reason wrong"))))
+
+  (println "\n== attention cleanup ==")
+  (cleanup dir))
+
 ;; ── Summary ────────────────────────────────────────────────────
 
 (println (str "\n" (apply str (repeat 50 "="))))

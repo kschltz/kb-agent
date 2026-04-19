@@ -7,6 +7,7 @@ import { AddCardDialog } from './components/AddCardDialog';
 import { ActivityBar } from './components/ActivityBar';
 import { ActivityFeed } from './components/ActivityFeed';
 import { ToastContainer } from './components/Toast';
+import { AttentionDashboard } from './components/AttentionDashboard';
 import type { CardData } from './types';
 import './index.css';
 
@@ -95,7 +96,10 @@ export default function App() {
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {activeTab === 'board' && (
           board && !board.error ? (
-            <Board board={board} onCardClick={setSelectedCard} send={send} />
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+              <AttentionDashboard board={board} onCardClick={setSelectedCard} />
+              <Board board={board} onCardClick={setSelectedCard} send={send} />
+            </div>
           ) : (
             <div style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
