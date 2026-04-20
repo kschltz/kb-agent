@@ -75,7 +75,7 @@ kb serve                             # open web UI
 |---|---|
 | `kb init` | Create `.kanban/`, verify git repo, record base branch |
 | `kb add <title> [--desc FILE]` | Create a card in backlog |
-| `kb pull [--lane] [--agent]` | Claim next card, create worktree + branch; `--lane` auto-moves card |
+| `kb pull [--lane] [--agent]` | Claim next card, create worktree + branch; `--lane` auto-moves card; `--force` bypasses file-collision check |
 | `kb move <card> <lane>` | Move card; run gates; merge on entering `done` |
 | `kb advance <card>` | Move card to next lane (shortcut for move) |
 | `kb done <card>` | Move card to final lane (runs all gates) |
