@@ -814,6 +814,43 @@
   (println "\n== File collision cleanup ==")
   (cleanup dir))
 
+;; ── No collision (happy path) ──────────────────────────────────
+
+(println "\n== No collision ==")
+(let [dir (make-repo)]
+  (kb dir "init")
+  (spit (str dir "/.kanban/board.yaml")
+        (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+             "lanes:\n  - name: backlog\n  - name: in-progress\n  - name: done\n"))
+  (sh-in dir "git" "add" "-f" ".kanban")
+  (sh-in dir "git" "commit" "-m" "kb init")
+
+  ;; Card 001 — pull and change src/a.clj
+  (kb dir "add" "Card A")
+  (kb dir "add" "Card B")
+  (let [r (kb dir "pull" "--lane" "in-progress" "--agent" "a1")]
+    (T "no-collision: pull 001 exits 0" (:ok r) (str "pull 001 failed: " (txt r))))
+  (let [wt (str dir "/.kanban/worktrees/001")]
+    (.mkdirs (io/file (str wt "/src")))
+    (spit (str wt "/src/a.clj") ";; a\n")
+    (sh-in wt "git" "add" ".")
+    (sh-in wt "git" "commit" "-m" "a.clj"))
+
+  ;; Card 002 branch only touches src/b.clj — no overlap
+  (sh-in dir "git" "branch" "kb/002-card-b" "master")
+  (sh-in dir "git" "checkout" "kb/002-card-b")
+  (.mkdirs (io/file (str dir "/src")))
+  (spit (str dir "/src/b.clj") ";; b\n")
+  (sh-in dir "git" "add" ".")
+  (sh-in dir "git" "commit" "-m" "b.clj")
+  (sh-in dir "git" "checkout" "master")
+
+  (let [r (kb dir "pull" "--agent" "a2")]
+    (T "no-collision: pull 002 succeeds" (:ok r) (str "pull 002 should have succeeded: " (:err r ""))))
+
+  (println "\n== No collision cleanup ==")
+  (cleanup dir))
+
 ;; ── Summary ────────────────────────────────────────────────────
 
 (println (str "\n" (apply str (repeat 50 "="))))
