@@ -191,7 +191,16 @@
 (defn cmd-pull
   [{:keys [opts]}]
   (let [board (b/make-board)
-        card (b/pull! board :agent (:agent opts "") :lane (:lane opts) :session (:session opts))]
+        card (try
+               (b/pull! board :agent (:agent opts "") :lane (:lane opts)
+                             :session (:session opts) :force? (:force opts false))
+               (catch clojure.lang.ExceptionInfo e
+                 (if (:collision-files (ex-data e))
+                   (do
+                     (println (str "⚠ " (ex-message e)))
+                     (println "Use --force to pull anyway.")
+                     (System/exit 1))
+                   (throw e))))]
     (if (nil? card)
       (do
         (when (:json opts) (out-json nil))
@@ -1166,7 +1175,9 @@
            :lane {:desc "Target lane to move card to"
                   :type :string}
            :session {:desc "Session name for agent ID (format: <session>-<card>-<lane>)"
-                     :type :string}}}
+                     :type :string}
+           :force {:desc "Pull even if file collisions detected with in-flight worktrees"
+                   :type :boolean}}}
    {:cmds ["move"] :fn cmd-move :args->opts [:card-id :lane]
     :opts {:confidence {:desc "Agent confidence level (0-100) for the move"
                         :type :number}

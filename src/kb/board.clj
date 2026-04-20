@@ -3,6 +3,7 @@
    Pure maps throughout — no classes."
   (:require [kb.util :as u]
             [clojure.string :as str]
+            [clojure.set :as set]
             [cheshire.core :as json]
             [babashka.process :as proc])
   (:import [java.nio.file Path]))
@@ -10,6 +11,14 @@
 ;; Forward declaration (move! defined after pull!)
 (declare move! deps-satisfied? all-cards find-card-dir! save-card! append-history! lane-by-name
          append-undo-entry!)
+
+;; ── String helpers ────────────────────────────────────────────
+
+(defn- not-blank-set
+  "Split a newline-separated string into a set of non-blank trimmed strings."
+  [s]
+  (when-not (str/blank? s)
+    (into #{} (filter #(not (str/blank? %))) (str/split s #"\n"))))
 
 ;; ── Key translation helpers ───────────────────────────────────
 ;;
@@ -670,6 +679,45 @@
     (catch Exception e
       {:exit 1 :out "" :err (str e)})))
 
+(defn detect-file-collisions
+  "Return a map of {card-id #{overlapping-file-paths}} for in-flight worktrees
+   that share changed files with the given branch.
+   Pure data-in/data-out — no side effects beyond git reads."
+  [board branch]
+  (let [proj   (:project-root board)
+        base   (base-branch board)
+        ;; Files changed on the candidate branch vs base, excluding .kanban/
+        branch-files (-> (git-safe :args ["diff" "--name-only" (str base "..." branch)] :cwd proj)
+                         :out str/trim not-blank-set
+                         (->> (remove #(str/starts-with? % ".kanban/")) set))
+        cards  (all-cards board)]
+    (when (seq branch-files)
+      (into {}
+        (keep identity
+          (for [card cards
+                :let [wt (:worktree card)]
+                :when (and (not (str/blank? wt))
+                           (u/path-exists? (u/->path wt))
+                           (not= (:lane card) (last (lane-names board))))]
+            ;; Uncommitted + committed-but-not-merged changes in worktree
+            (let [uncommitted (-> (git-safe :args ["diff" "--name-only"] :cwd wt)
+                                  :out str/trim not-blank-set)
+                  committed  (-> (git-safe :args ["diff" "--name-only" (str base "..." (:branch card))] :cwd wt)
+                                 :out str/trim not-blank-set)
+                  wt-files   (set/union uncommitted committed)
+                  overlap    (not-empty (set/intersection branch-files wt-files))]
+              (when overlap [(:id card) overlap]))))))))
+
+(defn check-file-collisions!
+  "Throw ex-info with :collision-files if the branch overlaps with active worktrees."
+  [board branch]
+  (let [collisions (detect-file-collisions board branch)]
+    (when (seq collisions)
+      (let [lines (for [[cid files] collisions]
+                    (str "  Card " cid ": " (str/join ", " (sort files))))]
+        (throw (ex-info (str "File collision with in-flight worktrees:\n" (str/join "\n" lines))
+                        {:collision-files collisions}))))))
+
 (defn create-worktree!
   "Create a git branch and worktree for a card.
    Returns [branch worktree-path-str]."
@@ -880,8 +928,9 @@
   "Pull the next available card. Creates worktree + branch.
    If :lane is specified, also moves the card to that lane.
    If :session is specified, agent-id is formatted as <session>-<card-id>-<lane>.
+   :force? bypasses file-collision detection.
    Returns card map or nil if no card available."
-  [board & {:keys [agent lane session]}]
+  [board & {:keys [agent lane session force?]}]
   (let [card (find-available-card board)]
     (when card
       (let [target-lane (or lane (:lane card))
@@ -898,6 +947,9 @@
             card'      (if (and lane (not= (:lane card) lane))
                          (load-card board (:id card))
                          card)
+            ;; Check for file collisions with other in-flight worktrees
+            branch     (str "kb/" (:id card') "-" (u/slugify (:title card')))
+            _          (when-not force? (check-file-collisions! board branch))
             [branch wt-path] (create-worktree! board card')
             updated    (assoc card'
                               :assigned-agent agent-id
