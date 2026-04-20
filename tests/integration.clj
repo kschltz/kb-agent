@@ -845,6 +845,8 @@
   (println "\n== doctor cleanup ==")
   (cleanup dir))
 
+;; ── kb attention ──────────────────────────────────────────────
+
 (println "\n== kb attention ==")
 (let [dir (make-repo)]
   (let [r (kb dir "init")]
@@ -921,6 +923,92 @@
         (T "att: --json blocked entry has reason" (= "waiting on design" (:reason b)) "blocked reason wrong"))))
 
   (println "\n== attention cleanup ==")
+  (cleanup dir))
+
+;; ── File collision detection ──────────────────────────────────
+
+(println "\n== File collision ==")
+(let [dir (make-repo)]
+  ;; Init board then override config for minimal lanes
+  (kb dir "init")
+  (spit (str dir "/.kanban/board.yaml")
+        (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+             "lanes:\n  - name: backlog\n  - name: in-progress\n  - name: done\n"))
+  ;; Commit the init so git checkout doesn't complain about dirty tree
+  (sh-in dir "git" "add" "-f" ".kanban")
+  (sh-in dir "git" "commit" "-m" "kb init")
+
+  ;; Card 001 — pull and make a change in its worktree
+  (kb dir "add" "First card")
+  (kb dir "add" "Second card")
+  (let [r (kb dir "pull" "--lane" "in-progress" "--agent" "a1")]
+    (T "collision: pull 001 exits 0" (:ok r) (str "pull 001 failed: " (txt r))))
+
+  ;; Make a file change in card 001's worktree
+  (let [wt (str dir "/.kanban/worktrees/001")]
+    (.mkdirs (io/file (str wt "/src")))
+    (spit (str wt "/src/core.clj") ";; first card change\n")
+    (sh-in wt "git" "add" ".")
+    (sh-in wt "git" "commit" "-m" "change core.clj"))
+
+  ;; Card 002 — create its branch with an overlapping file
+  (sh-in dir "git" "branch" "kb/002-second-card" "master")
+  (sh-in dir "git" "checkout" "kb/002-second-card")
+  (.mkdirs (io/file (str dir "/src")))
+  (spit (str dir "/src/core.clj") ";; second card change\n")
+  (sh-in dir "git" "add" ".")
+  (sh-in dir "git" "commit" "-m" "conflicting change on 002 branch")
+  (sh-in dir "git" "checkout" "master")
+
+  ;; Pull card 002 — should detect collision with card 001's worktree
+  (let [r (kb dir "pull" "--agent" "a2")
+        combined (str (:out r) (:err r))]
+    (T "collision: pull 002 detects collision" (not (:ok r)) "pull should have failed with collision")
+    (T "collision: message mentions collision" (str/includes? combined "collision")
+                                         (str "expected collision in output: " combined)))
+
+  ;; Pull with --force should succeed
+  (let [r (kb dir "pull" "--agent" "a2" "--force")]
+    (T "collision: --force pull succeeds" (:ok r) (str "force pull failed: " (:err r ""))))
+
+  (println "\n== File collision cleanup ==")
+  (cleanup dir))
+
+;; ── No collision (happy path) ──────────────────────────────────
+
+(println "\n== No collision ==")
+(let [dir (make-repo)]
+  (kb dir "init")
+  (spit (str dir "/.kanban/board.yaml")
+        (str "project: test\nbase_branch: master\nmerge_strategy: squash\nagent_command: echo\n"
+             "lanes:\n  - name: backlog\n  - name: in-progress\n  - name: done\n"))
+  (sh-in dir "git" "add" "-f" ".kanban")
+  (sh-in dir "git" "commit" "-m" "kb init")
+
+  ;; Card 001 — pull and change src/a.clj
+  (kb dir "add" "Card A")
+  (kb dir "add" "Card B")
+  (let [r (kb dir "pull" "--lane" "in-progress" "--agent" "a1")]
+    (T "no-collision: pull 001 exits 0" (:ok r) (str "pull 001 failed: " (txt r))))
+  (let [wt (str dir "/.kanban/worktrees/001")]
+    (.mkdirs (io/file (str wt "/src")))
+    (spit (str wt "/src/a.clj") ";; a\n")
+    (sh-in wt "git" "add" ".")
+    (sh-in wt "git" "commit" "-m" "a.clj"))
+
+  ;; Card 002 branch only touches src/b.clj — no overlap
+  (sh-in dir "git" "branch" "kb/002-card-b" "master")
+  (sh-in dir "git" "checkout" "kb/002-card-b")
+  (.mkdirs (io/file (str dir "/src")))
+  (spit (str dir "/src/b.clj") ";; b\n")
+  (sh-in dir "git" "add" ".")
+  (sh-in dir "git" "commit" "-m" "b.clj")
+  (sh-in dir "git" "checkout" "master")
+
+  (let [r (kb dir "pull" "--agent" "a2")]
+    (T "no-collision: pull 002 succeeds" (:ok r) (str "pull 002 should have succeeded: " (:err r ""))))
+
+  (println "\n== No collision cleanup ==")
   (cleanup dir))
 
 ;; ── Summary ────────────────────────────────────────────────────
