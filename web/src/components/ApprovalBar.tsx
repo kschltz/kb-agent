@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react';
-import type { UICommand } from '../types';
 
 interface ApprovalBarProps {
   cardId: string;

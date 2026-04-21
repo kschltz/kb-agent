@@ -1,4 +1,4 @@
-import { parseDiffStat, type FileStat } from '../lib/diff';
+import { parseDiffStat } from '../lib/diff';
 import { colorDiff } from '../lib/utils';
 
 interface DiffViewProps {
