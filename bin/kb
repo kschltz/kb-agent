@@ -4,5 +4,15 @@
 # Install: ln -s /path/to/kb-agent/bin/kb /usr/local/bin/kb
 #   or:    add to PATH in your shell profile
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve symlink(s) to find the real script location
+SCRIPT_SOURCE="$0"
+while [ -L "$SCRIPT_SOURCE" ]; do
+    SCRIPT_LINK="$(readlink "$SCRIPT_SOURCE")"
+    if [ "${SCRIPT_LINK#/}" = "$SCRIPT_LINK" ]; then
+        SCRIPT_SOURCE="$(dirname "$SCRIPT_SOURCE")/$SCRIPT_LINK"
+    else
+        SCRIPT_SOURCE="$SCRIPT_LINK"
+    fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 exec bb --config "$SCRIPT_DIR/../bb.edn" kb "$@"
