@@ -6,3 +6,13 @@ chrome/
 node_modules/
 *.pyc
 __pycache__/
+
+# Editor tooling caches
+.clj-kondo/
+.lsp/
+
+# Generated outputs / logs
+graphify-out/
+web/graphify-out/
+kb-serve.log
+nohup.out
