@@ -41,7 +41,7 @@ These are hard-won lessons from working with the `kb` CLI in this repo. Read the
 
 ### KB Workflow Pitfalls
 
-4. **`kb advance` requires an agent note** — You cannot advance without at least one `role: "agent"` note in the current lane. Use `kb note <id> "msg" --agent pi` (the `--agent` flag is what sets the role; without it, notes are saved as `role: "human"`).
+4. **`kb advance` requires an agent note** — The `has-lane-note?` gate checks for at least one note with `role: "agent"` in the current lane. `kb note <id> "msg"` defaults to `:agent "human"`, which records as `human/note` and is invisible to the gate. Use `kb note <id> "msg" --agent <name>` (e.g. `--agent claude`, `--agent pi`) to set `:agent "<name>"` and record as `agent/note`, which satisfies the gate.
 
 5. **`kb pull --lane X` pulls from backlog** — It does NOT pick up an existing card already in lane X. It creates a worktree for a backlog card and moves it into lane X. Use `kb move <id> <lane>` to reposition an existing card.
 
@@ -49,8 +49,14 @@ These are hard-won lessons from working with the `kb` CLI in this repo. Read the
 
 7. **`history.jsonl` is fragile** — Each line must be single-line valid JSON. If `kb context` or `kb show` fails with a parse error, look at the last few lines of the card's `history.jsonl` for corruption and remove them.
 
+8. **Card creation is separate from `kb pull`** — `kb pull` claims existing cards from the backlog; it does NOT create new cards. Creating cards is a different flow (manual or via a board-specific creation command). Plan your card breakdown before pulling.
+
+9. **Always `kb context <id>` before starting a lane** — `kb context` provides lane-specific MUST/MUST NOT instructions. Read it at the start of each lane to understand scope boundaries and avoid over-implementation.
+
+10. **Lane advancement is sequential** — Advance through lanes one at a time. Do not skip lanes or jump to arbitrary lanes without explicit user approval. Each lane gate must pass before the next.
+
 ### Board Config
 
-8. **Lane order**: `backlog → plan → in-progress → simplify → unit-tests → ui-test → code-quality → doc-update → done` — The extra gates catch issues early. `simplify` before tests is especially useful.
+11. **Lane order**: `backlog → plan → in-progress → simplify → unit-tests → ui-test → code-quality → doc-update → done` — The extra gates catch issues early. `simplify` before tests is especially useful.
 
-9. **Base branch is `pi-agent-work`** — not `master` or `main`. Cards merge into this branch on `done`.
+12. **Base branch is `pi-agent-work`** — not `master` or `main`. Cards merge into this branch on `done`.
